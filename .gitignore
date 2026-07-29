@@ -1,0 +1,36 @@
+# Keil MDK build outputs
+*.o
+*.d
+*.crf
+*.axf
+*.hex
+*.htm
+*.lnp
+*.map
+*.dep
+*.iex
+*.lst
+*.sct.bak
+*.build_log.htm
+*.dbgconf
+
+# Keil project user files
+*.uvguix.*
+*.uvoptx.bak
+*.bak
+
+# Object/build directories
+MDK-ARM/TST_H723/
+MDK-ARM/RTE/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# PDF (large binary)
+# *.pdf
