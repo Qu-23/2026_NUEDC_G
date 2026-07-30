@@ -229,13 +229,13 @@ int main(void)
             char dbg[32];
             snprintf(dbg, sizeof(dbg), "P%d R%d", current_page, rx_cnt);
             HMI_tx_lock();
-            HMI_send_string("t0", dbg);
+            HMI_send_string("t0.txt", dbg);
             HMI_tx_unlock();
             break;
           }
           default: /* Home */
             HMI_tx_lock();
-            HMI_send_string("t0", "MCU OK");
+            HMI_send_string("t0.txt", "MCU OK");
             HMI_tx_unlock();
             break;
         }
@@ -248,8 +248,8 @@ int main(void)
 
     /* OLED显示:
        L1: P:xxxx R:xxxx  (Vpp/Vrms mV)
-       L2: D:x H:xxxx     (ADC2 done + max 0-4095)
-       L3: L:xxxx A:xxxx  (ADC2 min + avg)
+       L2: H:xxxx L:xxxx  (ADC2 max + min 0-4095)
+       L3: A:xxxx         (ADC2 avg)
        L4: PGx RXxxx      (页面/RX计数)
     */
     OLED_ShowString(1,1,"P:");
@@ -257,15 +257,14 @@ int main(void)
     OLED_ShowString(1,8,"R:");
     OLED_ShowNum(1,10,vrms_mv,4);
 
-    OLED_ShowString(2,1,"D:");
-    OLED_ShowNum(2,3,adc2_done,1);
-    OLED_ShowString(2,4," H:");
-    OLED_ShowNum(2,7,adc2_max,4);
+    OLED_ShowString(2,1,"H:");
+    OLED_ShowNum(2,3,adc2_max,4);
+    OLED_ShowString(2,7," L:");
+    OLED_ShowNum(2,10,adc2_min,4);
 
-    OLED_ShowString(3,1,"L:");
-    OLED_ShowNum(3,3,adc2_min,4);
-    OLED_ShowString(3,7,"A:");
-    OLED_ShowNum(3,9,adc2_avg,4);
+    OLED_ShowString(3,1,"A:");
+    OLED_ShowNum(3,3,adc2_avg,4);
+    OLED_ShowString(3,7,"      ");
 
     OLED_ShowString(4,1,"PG");
     OLED_ShowNum(4,3,current_page,1);
