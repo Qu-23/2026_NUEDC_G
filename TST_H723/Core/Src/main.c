@@ -121,7 +121,7 @@ int main(void)
   OLED_Clear();
 
   /* 串口屏通信测试 */
-  HMI_send_string("t0.txt", "MCU OK");
+  HMI_send_string("t5.txt", "MCU OK");
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -150,40 +150,76 @@ int main(void)
     /* ADC1双通道采样 (256x过采样, ≈0.8ms/次) */
     ADC_Read_Channels();
 
+    /* ADC2周期采样 (OLED验证 + HMI波形数据源, 每200ms一次) */
+    {
+      static uint32_t last_adc2 = 0;
+      if (adc2_done && HAL_GetTick() - last_adc2 >= 200)
+      {
+        last_adc2 = HAL_GetTick();
+        ADC2_StartCapture();
+      }
+    }
+
+    /* ADC2缓冲区分析 (OLED验证: done/max/min/avg) */
+    static uint16_t adc2_max = 0, adc2_min = 4095, adc2_avg = 0;
+    static uint8_t adc2_analyzed = 0;
+    if (adc2_done && !adc2_analyzed)
+    {
+      uint32_t sum = 0;
+      uint16_t mx = 0, mn = 4095;
+      for (uint16_t i = 0; i < ADC2_BUF_SIZE; i++)
+      {
+        uint16_t v = adc2_buf[i];
+        if (v > mx) mx = v;
+        if (v < mn) mn = v;
+        sum += v;
+      }
+      adc2_max = mx;
+      adc2_min = mn;
+      adc2_avg = sum / ADC2_BUF_SIZE;
+      adc2_analyzed = 1;
+    }
+    else if (!adc2_done)
+    {
+      adc2_analyzed = 0;
+    }
+
     /* HMI数据刷新 (周期性, 题目要求2s内完成处理和显示) */
     {
       static uint32_t last_hmi = 0;
       if (HAL_GetTick() - last_hmi >= HMI_PERIOD_MS)
       {
         last_hmi = HAL_GetTick();
-        HMI_tx_lock();
         switch (current_page)
         {
           case 1: /* 时域波形+参数 */
           {
-            ADC2_StartCapture();  /* 8192点 @ 4.03MHz ≈ 2ms */
+            /* 等待最新周期采样完成 (最多等10ms) */
             uint32_t t0 = HAL_GetTick();
-            while (!adc2_done && HAL_GetTick() - t0 < 100) {}
+            while (!adc2_done && HAL_GetTick() - t0 < 10) {}
             /* 降采样: 8192点 → 512点, 每16点取1个, >>4映射到8bit */
             for (uint16_t i = 0; i < PAGE1_PTS; i++)
               curve_data[i] = adc2_buf[i * 16] >> 4;
+            HMI_tx_lock();
             HMI_curve_clear(CURVE_OBJ_ID, 0);
             HMI_curve_addt(CURVE_OBJ_ID, 0, curve_data, PAGE1_PTS);
             HMI_send_val("Vpp", (int)(adc_vpp_volt * 1000));
             HMI_send_val("Vrms", (int)(adc_vrms_volt * 1000));
             HMI_send_val("f", 0);
+            HMI_tx_unlock();
             break;
           }
           case 2: /* 全屏波形 */
           {
-            ADC2_StartCapture();
             uint32_t t0 = HAL_GetTick();
-            while (!adc2_done && HAL_GetTick() - t0 < 100) {}
+            while (!adc2_done && HAL_GetTick() - t0 < 10) {}
             /* 降采样: 8192点 → 1024点, 每8点取1个 */
             for (uint16_t i = 0; i < PAGE2_PTS; i++)
               curve_data[i] = adc2_buf[i * 8] >> 4;
+            HMI_tx_lock();
             HMI_curve_clear(CURVE_OBJ_ID, 0);
             HMI_curve_addt(CURVE_OBJ_ID, 0, curve_data, PAGE2_PTS);
+            HMI_tx_unlock();
             break;
           }
           case 3: /* 频谱: FFT待实现 */
@@ -192,14 +228,17 @@ int main(void)
           {
             char dbg[32];
             snprintf(dbg, sizeof(dbg), "P%d R%d", current_page, rx_cnt);
+            HMI_tx_lock();
             HMI_send_string("t0", dbg);
+            HMI_tx_unlock();
             break;
           }
           default: /* Home */
+            HMI_tx_lock();
             HMI_send_string("t0", "MCU OK");
+            HMI_tx_unlock();
             break;
         }
-        HMI_tx_unlock();
       }
     }
 
@@ -207,17 +246,26 @@ int main(void)
     uint16_t vpp_mv = (uint16_t)(adc_vpp_volt * 1000.0f);
     uint16_t vrms_mv = (uint16_t)(adc_vrms_volt * 1000.0f);
 
-    /* OLED显示: P=Vpp mV, R=Vrms mV, 原始值, 页面/RX */
+    /* OLED显示:
+       L1: P:xxxx R:xxxx  (Vpp/Vrms mV)
+       L2: D:x H:xxxx     (ADC2 done + max 0-4095)
+       L3: L:xxxx A:xxxx  (ADC2 min + avg)
+       L4: PGx RXxxx      (页面/RX计数)
+    */
     OLED_ShowString(1,1,"P:");
     OLED_ShowNum(1,3,vpp_mv,4);
     OLED_ShowString(1,8,"R:");
     OLED_ShowNum(1,10,vrms_mv,4);
 
-    OLED_ShowString(2,1,"Vp:");
-    OLED_ShowNum(2,4,adc_vpp,5);
+    OLED_ShowString(2,1,"D:");
+    OLED_ShowNum(2,3,adc2_done,1);
+    OLED_ShowString(2,4," H:");
+    OLED_ShowNum(2,7,adc2_max,4);
 
-    OLED_ShowString(3,1,"Vr:");
-    OLED_ShowNum(3,4,adc_vrms,5);
+    OLED_ShowString(3,1,"L:");
+    OLED_ShowNum(3,3,adc2_min,4);
+    OLED_ShowString(3,7,"A:");
+    OLED_ShowNum(3,9,adc2_avg,4);
 
     OLED_ShowString(4,1,"PG");
     OLED_ShowNum(4,3,current_page,1);
