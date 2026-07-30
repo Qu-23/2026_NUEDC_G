@@ -182,10 +182,10 @@ int main(void)
       adc2_analyzed = 0;
     }
 
-    /* HMI数据刷新 (循环计数器, 约1.2秒周期, 题目要求2s内留余量) */
+    /* HMI数据刷新 (循环计数器, 约0.9秒周期, 题目要求2s内留余量) */
     {
       static uint8_t hmi_div = 0;
-      if (++hmi_div >= 12)  /* 约1.2秒(12次循环×~100ms), 2s内可完成1次刷新且留0.8s余量 */
+      if (++hmi_div >= 9)  /* 约0.9秒(9次循环×~100ms), 2s内可完成2次刷新且余量充足 */
       {
         hmi_div = 0;
         switch (current_page)
