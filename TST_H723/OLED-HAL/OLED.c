@@ -1,9 +1,9 @@
 #include "OLED_Font.h"
 #include "main.h"
 
-#define OLED_SCL_Port    GPIOB
-#define OLED_SCL_Pin     GPIO_PIN_6
-#define OLED_SDA_Port    GPIOB
+#define OLED_SCL_Port    GPIOC
+#define OLED_SCL_Pin     GPIO_PIN_8
+#define OLED_SDA_Port    GPIOC
 #define OLED_SDA_Pin     GPIO_PIN_7
 
 #define OLED_W_SCL(x)    HAL_GPIO_WritePin(OLED_SCL_Port, OLED_SCL_Pin, (GPIO_PinState)(x))
@@ -22,15 +22,13 @@ void OLED_I2C_Init(void)
 {
     GPIO_InitTypeDef GPIO_InitStructure = {0};
 
-//    __HAL_RCC_GPIOC_CLK_ENABLE();
-	    __HAL_RCC_GPIOB_CLK_ENABLE();
+    __HAL_RCC_GPIOC_CLK_ENABLE();
 
     GPIO_InitStructure.Pin = OLED_SCL_Pin | OLED_SDA_Pin;
     GPIO_InitStructure.Mode = GPIO_MODE_OUTPUT_OD;
     GPIO_InitStructure.Pull = GPIO_PULLUP;
     GPIO_InitStructure.Speed = GPIO_SPEED_FREQ_HIGH;
-//    HAL_GPIO_Init(GPIOC, &GPIO_InitStructure);
-	    HAL_GPIO_Init(GPIOB, &GPIO_InitStructure);
+    HAL_GPIO_Init(GPIOC, &GPIO_InitStructure);
 
     OLED_W_SCL(1);
     OLED_W_SDA(1);

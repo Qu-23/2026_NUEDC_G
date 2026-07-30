@@ -50,8 +50,6 @@
 /* 页面: 0=主页, 1=波形, 2=参数, 3=频谱, 4=调试 */
 int8_t current_page = 0;
 uint8_t rx_cnt = 0;
-#define ADC_BUF_SIZE 512
-extern uint16_t adc_buf[ADC_BUF_SIZE];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -112,11 +110,6 @@ int main(void)
   OLED_Init();
   OLED_Clear();
 
-  /* 启动TIM2触发ADC采样 */
-  HAL_TIM_Base_Start(&htim2);
-  /* 启动ADC DMA循环采样 */
-  HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_buf, ADC_BUF_SIZE);
-
   /* 串口屏通信测试 */
   HMI_send_string("t0.txt", "MCU OK");
   /* USER CODE END 2 */
@@ -146,46 +139,29 @@ int main(void)
       HAL_UART_Transmit(&huart3, USART_RX_BUF, 1, 50);
     }
 
-    /* OLED副屏：联动调试信息 */
-    SCB_InvalidateDCache_by_Addr((uint32_t *)adc_buf, sizeof(adc_buf));
-    OLED_ShowString(1,1,"PG:");
-    OLED_ShowNum(1,4,current_page,1);
-    OLED_ShowString(1,5," RX:");
-    OLED_ShowNum(1,9,rx_cnt,3);
+    /* ADC1双通道采样 (256x过采样, ≈0.8ms/次) */
+    ADC_Read_Channels();
 
-    OLED_ShowString(2,1,"V0:");
-    OLED_ShowNum(2,4,adc_buf[0],4);
-    OLED_ShowString(2,9,"V5:");
-    OLED_ShowNum(2,12,adc_buf[511],4);
+    /* 电压转换: 16bit raw → mV */
+    uint16_t vpp_mv = (uint16_t)(adc_vpp_volt * 1000.0f);
+    uint16_t vrms_mv = (uint16_t)(adc_vrms_volt * 1000.0f);
 
-    OLED_ShowString(3,1,"ND:");
-    OLED_ShowNum(3,4,DMA1_Stream0->NDTR,4);
-    OLED_ShowString(3,9,"T2:");
-    OLED_ShowNum(3,12,TIM2->CNT,4);
+    /* OLED显示: P=Vpp mV, R=Vrms mV, 原始值, 页面/RX */
+    OLED_ShowString(1,1,"P:");
+    OLED_ShowNum(1,3,vpp_mv,4);
+    OLED_ShowString(1,8,"R:");
+    OLED_ShowNum(1,10,vrms_mv,4);
 
-    OLED_ShowString(4,1,"ADR:");
-    OLED_ShowHexNum(4,5,(uint32_t)adc_buf,8);
+    OLED_ShowString(2,1,"Vp:");
+    OLED_ShowNum(2,4,adc_vpp,5);
 
-    /* 时域波形页：向串口屏曲线控件发送降采样数据 */
-    if (current_page == 1)
-    {
-      int step = ADC_BUF_SIZE / 200;
-      for (int i = 0; i < 200; i++)
-      {
-        uint8_t val = adc_buf[i * step] >> 4;
-        HMI_waveform_add(0, 0, val);
-      }
-    }
+    OLED_ShowString(3,1,"Vr:");
+    OLED_ShowNum(3,4,adc_vrms,5);
 
-    /* TX心跳：每秒向串口发一条可见消息，用于USB-TTL验证TX通路 */
-    {
-      static uint32_t last_tick = 0;
-      if (HAL_GetTick() - last_tick >= 1000)
-      {
-        last_tick = HAL_GetTick();
-        HMI_send_string("t0.txt", "HI");
-      }
-    }
+    OLED_ShowString(4,1,"PG");
+    OLED_ShowNum(4,3,current_page,1);
+    OLED_ShowString(4,5,"RX");
+    OLED_ShowNum(4,7,rx_cnt,3);
 
     HAL_Delay(100);
   }

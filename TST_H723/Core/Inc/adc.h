@@ -41,7 +41,11 @@ extern ADC_HandleTypeDef hadc1;
 void MX_ADC1_Init(void);
 
 /* USER CODE BEGIN Prototypes */
-
+extern uint16_t adc_vpp;      /* PA1/INP17 Vpp, 16bit raw */
+extern uint16_t adc_vrms;     /* PA0/INP16 Vrms, 16bit raw */
+extern float adc_vpp_volt;    /* Vpp电压值 (V) */
+extern float adc_vrms_volt;   /* Vrms电压值 (V) */
+void ADC_Read_Channels(void);
 /* USER CODE END Prototypes */
 
 #ifdef __cplusplus
