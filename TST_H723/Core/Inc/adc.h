@@ -51,6 +51,7 @@ void ADC_Read_Channels(void);
 
 extern uint16_t adc2_buf[ADC2_BUF_SIZE];  /* PA6/INP3 ADC2 DMA缓冲区 */
 extern volatile uint8_t adc2_done;        /* DMA完成标志 */
+extern volatile uint32_t adc2_capture_ms; /* ADC2采样耗时(ms), 诊断用 */
 void ADC2_StartCapture(void);
 /* USER CODE END Prototypes */
 

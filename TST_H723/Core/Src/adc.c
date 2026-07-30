@@ -295,10 +295,13 @@ void ADC_Read_Channels(void)
 /* 缓冲区放AXI SRAM (DMA_BUF段), 避免D-Cache问题 */
 uint16_t adc2_buf[ADC2_BUF_SIZE] __attribute__((section("DMA_BUF")));
 volatile uint8_t adc2_done = 1;
+volatile uint32_t adc2_capture_ms = 0;  /* ADC2采样耗时(ms), 诊断用 */
+static uint32_t adc2_start_tick = 0;
 
 void ADC2_StartCapture(void)
 {
   adc2_done = 0;
+  adc2_start_tick = HAL_GetTick();
   /* 启动前Invalidate, 清除可能的脏Cache行 */
   SCB_InvalidateDCache_by_Addr((uint32_t *)adc2_buf, sizeof(adc2_buf));
   HAL_ADC_Stop_DMA(&hadc2);
@@ -312,6 +315,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
   if (hadc->Instance == ADC2)
   {
     HAL_TIM_Base_Stop(&htim2);
+    adc2_capture_ms = HAL_GetTick() - adc2_start_tick;
     /* DMA完成后Invalidate, 确保CPU读到DMA写入的最新数据 */
     SCB_InvalidateDCache_by_Addr((uint32_t *)adc2_buf, sizeof(adc2_buf));
     adc2_done = 1;

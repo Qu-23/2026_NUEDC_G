@@ -7,13 +7,11 @@
 #define FFT_N       8192U
 #define FFT_N_HALF  (FFT_N / 2U)
 
-/* 采样率: 待确认 (TIM2 Period=67, 原配置不改动)
-   APB1定时器时钟计算方式:
-   PCLK1 = HCLK/APB1分频, 定时器时钟 = PCLK1*2 (当APB1分频!=1时)
-   需通过已知信号频率+OLED的K值反推确认 */
-#define FFT_FS      4000000.0f  /* 暂用4MHz, 待确认后修正 */
+/* 采样率: TIM2触发270MHz/67=4.03MHz, 但ADC转换时间280ns>触发周期248ns,
+   导致隔触发采样, 实际采样率减半 = 2.015MHz */
+#define FFT_FS      2015000.0f
 
-/* 频率分辨率: fs/N (待确认后修正) */
+/* 频率分辨率: fs/N = 245.97Hz */
 #define FFT_DF      (FFT_FS / (float)FFT_N)
 
 /* 复数结构体 */
