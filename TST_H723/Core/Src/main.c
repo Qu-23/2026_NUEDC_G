@@ -259,7 +259,7 @@ int main(void)
     /* OLED显示:
        L1: P:xxxx R:xxxx  (Vpp/Vrms mV)
        L2: H:xxxx L:xxxx  (ADC2 max + min 0-4095)
-       L3: A:xxxx         (ADC2 avg)
+       L3: Exxx Axxx       (UART错误次数 + addt超时次数, 诊断PG失灵)
        L4: PGx RXxxx      (页面/RX计数)
     */
     OLED_ShowString(1,1,"P:");
@@ -272,9 +272,10 @@ int main(void)
     OLED_ShowString(2,7," L:");
     OLED_ShowNum(2,10,adc2_min,4);
 
-    OLED_ShowString(3,1,"A:");
-    OLED_ShowNum(3,3,adc2_avg,4);
-    OLED_ShowString(3,7,"      ");
+    OLED_ShowString(3,1,"E");
+    OLED_ShowNum(3,2,uart_err_cnt,3);
+    OLED_ShowString(3,6," A");
+    OLED_ShowNum(3,8,addt_err_cnt,3);
 
     OLED_ShowString(4,1,"PG");
     OLED_ShowNum(4,3,current_page,1);

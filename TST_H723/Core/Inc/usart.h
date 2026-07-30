@@ -43,6 +43,8 @@ void MX_USART3_UART_Init(void);
 /* USER CODE BEGIN Prototypes */
 extern uint8_t  USART_RX_BUF[USART_REC_LEN];
 extern uint16_t USART_RX_STA;
+extern volatile uint16_t uart_err_cnt;   /* UART错误次数(诊断PG失灵) */
+extern volatile uint16_t addt_err_cnt;   /* addt透传超时次数 */
 void HMI_send_string(char *name, char *showdata);
 void HMI_send_number(char *name, int num);
 void HMI_send_val(char *name, int num);

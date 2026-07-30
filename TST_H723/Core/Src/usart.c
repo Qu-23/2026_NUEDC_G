@@ -24,6 +24,8 @@
 uint8_t  USART_RX_BUF[USART_REC_LEN];
 uint16_t USART_RX_STA = 0;
 uint8_t rx_byte;
+volatile uint16_t uart_err_cnt = 0;   /* UART错误(ORE/FE/NE)次数, 诊断PG失灵用 */
+volatile uint16_t addt_err_cnt = 0;   /* addt透传超时(0xFE/0xFD)次数 */
 /* USER CODE END 0 */
 
 UART_HandleTypeDef huart3;
@@ -237,6 +239,7 @@ uint8_t HMI_curve_addt(const char *objid, uint8_t ch, const uint8_t *data, uint1
   if (resp != 0xFE)
   {
     /* 0xFE超时: 屏幕可能已进入透传模式, 发送qty字节0x00防止屏幕卡死 */
+    addt_err_cnt++;
     static const uint8_t dummy[1024] = {0};
     HAL_UART_Transmit(&huart3, (uint8_t *)dummy, qty, 200);
     goto addt_done;
@@ -269,6 +272,8 @@ addt_done:
   __HAL_UART_CLEAR_OREFLAG(&huart3);
   if (cr1 & USART_CR1_RXNEIE)
     __HAL_UART_ENABLE_IT(&huart3, UART_IT_RXNE);
+  if (resp != 0xFD)
+    addt_err_cnt++;
 
   return (resp == 0xFD);
 }
@@ -287,6 +292,9 @@ void HMI_tx_unlock(void)
     (void)tmp;
   }
   __HAL_UART_CLEAR_OREFLAG(&huart3);
+  /* 清空接收状态机: tx_lock期间若PG命令帧被切断(如收到0xNN后lock, 0x0D/0x0A丢失),
+     STA会残留在错误位置, 后续命令解析到BUF错误偏移 → PG间歇性失灵 */
+  USART_RX_STA = 0;
   /* 防御: 若tx_lock期间ErrorCallback将rxState置为READY, 恢复RXNEIE后
      HAL_UART_IRQHandler不会处理接收(因rxState!=BUSY_RX), 导致PG永久失灵 */
   if (huart3.RxState != HAL_UART_STATE_BUSY_RX)
@@ -329,6 +337,7 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
   if (huart->Instance == USART3)
   {
+    uart_err_cnt++;
     USART_RX_STA = 0;
     HAL_UART_AbortReceive_IT(&huart3);
     HAL_UART_Receive_IT(&huart3, &rx_byte, 1);
