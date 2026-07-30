@@ -59,6 +59,10 @@ uint8_t rx_cnt = 0;
 
 /* addt透传数据缓冲(最大PAGE2_PTS=1024点) */
 static uint8_t curve_data[PAGE2_PTS];
+
+/* FFT诊断变量 (OLED第三行显示) */
+uint32_t fft_k_peak = 0;    /* 基频bin索引 */
+float fft_freq_hz = 0.0f;   /* 基频频率(Hz) */
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -191,15 +195,13 @@ int main(void)
         hmi_div = 0;
 
         /* FFT预处理: case1需要频率, case3需要频谱+谐波幅值 */
-        uint32_t k_peak = 0;
-        float fft_freq = 0.0f;
         if (current_page == 1 || current_page == 3)
         {
           uint32_t t0 = HAL_GetTick();
           while (!adc2_done && HAL_GetTick() - t0 < 10) {}
           /* FFT: 8192点 → 频谱600点存入curve_data + 基频bin索引 */
-          k_peak = FFT_Process(adc2_buf, curve_data, PAGE3_PTS);
-          fft_freq = FFT_GetFrequency(k_peak);
+          fft_k_peak = FFT_Process(adc2_buf, curve_data, PAGE3_PTS);
+          fft_freq_hz = FFT_GetFrequency(fft_k_peak);
         }
 
         switch (current_page)
@@ -214,7 +216,7 @@ int main(void)
             HMI_curve_addt("s0.id", 0, curve_data, PAGE1_PTS);
             HMI_send_val("Vpp", (int)(adc_vpp_volt * 1000));
             HMI_send_val("Vrms", (int)(adc_vrms_volt * 1000));
-            HMI_send_val("f", (int)fft_freq);
+            HMI_send_val("f", (int)(fft_freq_hz / 1000.0f));  /* kHz */
             HMI_tx_unlock();
             break;
           }
@@ -234,9 +236,9 @@ int main(void)
           case 3: /* 电压频谱 */
           {
             /* curve_data已被FFT_Process填充为频谱数据(600点) */
-            float vb = FFT_GetAmplitude(k_peak, 1);  /* 基频幅值 */
-            float v1 = FFT_GetAmplitude(k_peak, 2);  /* 二次谐波 */
-            float v2 = FFT_GetAmplitude(k_peak, 3);  /* 三次谐波 */
+            float vb = FFT_GetAmplitude(fft_k_peak, 1);  /* 基频幅值 */
+            float v1 = FFT_GetAmplitude(fft_k_peak, 2);  /* 二次谐波 */
+            float v2 = FFT_GetAmplitude(fft_k_peak, 3);  /* 三次谐波 */
             HMI_tx_lock();
             HMI_curve_clear("s0.id", 0);
             HMI_curve_addt("s0.id", 0, curve_data, PAGE3_PTS);
@@ -268,7 +270,7 @@ int main(void)
     /* OLED显示:
        L1: P:xxxx R:xxxx  (Vpp/Vrms mV)
        L2: H:xxxx L:xxxx  (ADC2 max + min 0-4095)
-       L3: Exxx Axxx       (UART错误次数 + addt超时次数, 诊断PG失灵)
+       L3: Kxxxx Fyyyyy   (FFT基频bin索引 + 频率Hz, 诊断用)
        L4: PGx RXxxx      (页面/RX计数)
     */
     OLED_ShowString(1,1,"P:");
@@ -281,10 +283,10 @@ int main(void)
     OLED_ShowString(2,7," L:");
     OLED_ShowNum(2,10,adc2_min,4);
 
-    OLED_ShowString(3,1,"E");
-    OLED_ShowNum(3,2,uart_err_cnt,3);
-    OLED_ShowString(3,6," A");
-    OLED_ShowNum(3,8,addt_err_cnt,3);
+    OLED_ShowString(3,1,"K");
+    OLED_ShowNum(3,2,fft_k_peak,4);
+    OLED_ShowString(3,7,"F");
+    OLED_ShowNum(3,8,(uint32_t)fft_freq_hz,5);
 
     OLED_ShowString(4,1,"PG");
     OLED_ShowNum(4,3,current_page,1);
