@@ -270,7 +270,7 @@ int main(void)
     /* OLED显示:
        L1: P:xxxx R:xxxx  (Vpp/Vrms mV)
        L2: H:xxxx L:xxxx  (ADC2 max + min 0-4095)
-       L3: Kxxxx Fyyyyy   (FFT基频bin索引 + 频率Hz, 诊断用)
+       L3: Sxxx Pyy Kyyy  (SYSCLK/PCLK1 MHz + 基频bin, 时钟诊断)
        L4: PGx RXxxx      (页面/RX计数)
     */
     OLED_ShowString(1,1,"P:");
@@ -283,10 +283,13 @@ int main(void)
     OLED_ShowString(2,7," L:");
     OLED_ShowNum(2,10,adc2_min,4);
 
-    OLED_ShowString(3,1,"K");
-    OLED_ShowNum(3,2,fft_k_peak,4);
-    OLED_ShowString(3,7,"F");
-    OLED_ShowNum(3,8,(uint32_t)fft_freq_hz,5);
+    /* L3: 时钟诊断 S=SYSCLK(MHz) P=PCLK1(MHz) K=基频bin */
+    OLED_ShowString(3,1,"S");
+    OLED_ShowNum(3,2,HAL_RCC_GetSysClockFreq()/1000000,3);
+    OLED_ShowString(3,6,"P");
+    OLED_ShowNum(3,7,HAL_RCC_GetPCLK1Freq()/1000000,3);
+    OLED_ShowString(3,10,"K");
+    OLED_ShowNum(3,11,fft_k_peak,4);
 
     OLED_ShowString(4,1,"PG");
     OLED_ShowNum(4,3,current_page,1);
