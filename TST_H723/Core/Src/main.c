@@ -27,6 +27,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "OLED_EX.h"
+#include "fft.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -188,14 +189,24 @@ int main(void)
       if (++hmi_div >= 9)  /* 约0.9秒(9次循环×~100ms), 2s内可完成2次刷新且余量充足 */
       {
         hmi_div = 0;
+
+        /* FFT预处理: case1需要频率, case3需要频谱+谐波幅值 */
+        uint32_t k_peak = 0;
+        float fft_freq = 0.0f;
+        if (current_page == 1 || current_page == 3)
+        {
+          uint32_t t0 = HAL_GetTick();
+          while (!adc2_done && HAL_GetTick() - t0 < 10) {}
+          /* FFT: 8192点 → 频谱600点存入curve_data + 基频bin索引 */
+          k_peak = FFT_Process(adc2_buf, curve_data, PAGE3_PTS);
+          fft_freq = FFT_GetFrequency(k_peak);
+        }
+
         switch (current_page)
         {
           case 1: /* 时域波形+参数 */
           {
-            /* 等待最新周期采样完成 (最多等10ms) */
-            uint32_t t0 = HAL_GetTick();
-            while (!adc2_done && HAL_GetTick() - t0 < 10) {}
-            /* 降采样: 8192点 → 512点, 每16点取1个, >>4映射到8bit */
+            /* 降采样: 8192点 → 512点 (覆盖curve_data中的频谱数据) */
             for (uint16_t i = 0; i < PAGE1_PTS; i++)
               curve_data[i] = adc2_buf[i * 16] >> 4;
             HMI_tx_lock();
@@ -203,7 +214,7 @@ int main(void)
             HMI_curve_addt("s0.id", 0, curve_data, PAGE1_PTS);
             HMI_send_val("Vpp", (int)(adc_vpp_volt * 1000));
             HMI_send_val("Vrms", (int)(adc_vrms_volt * 1000));
-            HMI_send_val("f", 0);
+            HMI_send_val("f", (int)fft_freq);
             HMI_tx_unlock();
             break;
           }
@@ -220,20 +231,18 @@ int main(void)
             HMI_tx_unlock();
             break;
           }
-          case 3: /* 电压频谱: FFT待实现, 先搭建发送框架 */
+          case 3: /* 电压频谱 */
           {
-            uint32_t t0 = HAL_GetTick();
-            while (!adc2_done && HAL_GetTick() - t0 < 10) {}
-            /* TODO: FFT实现后替换为真实频谱数据 */
-            /* 降采样: 8192点 → 600点 (临时用时域数据占位) */
-            for (uint16_t i = 0; i < PAGE3_PTS; i++)
-              curve_data[i] = adc2_buf[(uint32_t)i * ADC2_BUF_SIZE / PAGE3_PTS] >> 4;
+            /* curve_data已被FFT_Process填充为频谱数据(600点) */
+            float vb = FFT_GetAmplitude(k_peak, 1);  /* 基频幅值 */
+            float v1 = FFT_GetAmplitude(k_peak, 2);  /* 二次谐波 */
+            float v2 = FFT_GetAmplitude(k_peak, 3);  /* 三次谐波 */
             HMI_tx_lock();
             HMI_curve_clear("s0.id", 0);
             HMI_curve_addt("s0.id", 0, curve_data, PAGE3_PTS);
-            HMI_send_float("vb", 0.0f);  /* 基频幅值, FFT待实现 */
-            HMI_send_float("v1", 0.0f);  /* 分量1幅值, FFT待实现 */
-            HMI_send_float("v2", 0.0f);  /* 分量2幅值, FFT待实现 */
+            HMI_send_float("vb", vb);
+            HMI_send_float("v1", v1);
+            HMI_send_float("v2", v2);
             HMI_tx_unlock();
             break;
           }
