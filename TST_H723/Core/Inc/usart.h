@@ -49,8 +49,8 @@ void HMI_send_val(char *name, int num);
 void HMI_send_float(char *name, float num);
 void HMI_waveform_add(int curve_id, int ch, int value);
 void HMI_spectrum_add(int curve_id, int ch, int value);
-void HMI_curve_clear(uint8_t objid, uint8_t ch);
-uint8_t HMI_curve_addt(uint8_t objid, uint8_t ch, const uint8_t *data, uint16_t qty);
+void HMI_curve_clear(const char *objid, uint8_t ch);
+uint8_t HMI_curve_addt(const char *objid, uint8_t ch, const uint8_t *data, uint16_t qty);
 void HMI_tx_lock(void);
 void HMI_tx_unlock(void);
 /* USER CODE END Prototypes */

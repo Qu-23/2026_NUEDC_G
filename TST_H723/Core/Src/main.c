@@ -50,11 +50,12 @@
 /* 页面: 0=主页, 1=波形, 2=参数, 3=频谱, 4=调试 */
 int8_t current_page = 0;
 uint8_t rx_cnt = 0;
+static uint16_t hmi_cnt = 0;  /* HMI刷新计数(OLED诊断) */
 
 /* HMI曲线交互参数 */
-#define CURVE_OBJ_ID   1        /* s0曲线控件的对象ID */
 #define PAGE1_PTS      512      /* 页面1横向像素 */
 #define PAGE2_PTS      1024     /* 页面2横向像素 */
+#define PAGE3_PTS      600      /* 页面3横向像素(频谱) */
 #define HMI_PERIOD_MS  1500     /* HMI刷新周期(题目要求2s内, 留500ms余量) */
 
 /* addt透传数据缓冲(最大PAGE2_PTS=1024点) */
@@ -120,8 +121,8 @@ int main(void)
   OLED_Init();
   OLED_Clear();
 
-  /* 串口屏通信测试 */
-  HMI_send_string("t5.txt", "MCU OK");
+  /* 诊断: 复位时发送t1.txt到P4, 验证TX链路 (屏幕提前翻至P4) */
+  HMI_send_string("t1.txt", "BOOT");
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -190,6 +191,9 @@ int main(void)
       if (HAL_GetTick() - last_hmi >= HMI_PERIOD_MS)
       {
         last_hmi = HAL_GetTick();
+        hmi_cnt++;
+        /* 诊断: 进入switch前发送t1.txt (不加lock, 与初始化发送一致) */
+        HMI_send_string("t1.txt", "HMI RUN");
         switch (current_page)
         {
           case 1: /* 时域波形+参数 */
@@ -201,8 +205,8 @@ int main(void)
             for (uint16_t i = 0; i < PAGE1_PTS; i++)
               curve_data[i] = adc2_buf[i * 16] >> 4;
             HMI_tx_lock();
-            HMI_curve_clear(CURVE_OBJ_ID, 0);
-            HMI_curve_addt(CURVE_OBJ_ID, 0, curve_data, PAGE1_PTS);
+            HMI_curve_clear("s0.id", 0);
+            HMI_curve_addt("s0.id", 0, curve_data, PAGE1_PTS);
             HMI_send_val("Vpp", (int)(adc_vpp_volt * 1000));
             HMI_send_val("Vrms", (int)(adc_vrms_volt * 1000));
             HMI_send_val("f", 0);
@@ -217,26 +221,38 @@ int main(void)
             for (uint16_t i = 0; i < PAGE2_PTS; i++)
               curve_data[i] = adc2_buf[i * 8] >> 4;
             HMI_tx_lock();
-            HMI_curve_clear(CURVE_OBJ_ID, 0);
-            HMI_curve_addt(CURVE_OBJ_ID, 0, curve_data, PAGE2_PTS);
+            HMI_curve_clear("s0.id", 0);
+            HMI_curve_addt("s0.id", 0, curve_data, PAGE2_PTS);
             HMI_tx_unlock();
             break;
           }
-          case 3: /* 频谱: FFT待实现 */
+          case 3: /* 电压频谱: FFT待实现, 先搭建发送框架 */
+          {
+            uint32_t t0 = HAL_GetTick();
+            while (!adc2_done && HAL_GetTick() - t0 < 10) {}
+            /* TODO: FFT实现后替换为真实频谱数据 */
+            /* 降采样: 8192点 → 600点 (临时用时域数据占位) */
+            for (uint16_t i = 0; i < PAGE3_PTS; i++)
+              curve_data[i] = adc2_buf[(uint32_t)i * ADC2_BUF_SIZE / PAGE3_PTS] >> 4;
+            HMI_tx_lock();
+            HMI_curve_clear("s0.id", 0);
+            HMI_curve_addt("s0.id", 0, curve_data, PAGE3_PTS);
+            HMI_send_float("vb", 0.0f);  /* 基频幅值, FFT待实现 */
+            HMI_send_float("v1", 0.0f);  /* 分量1幅值, FFT待实现 */
+            HMI_send_float("v2", 0.0f);  /* 分量2幅值, FFT待实现 */
+            HMI_tx_unlock();
             break;
-          case 4: /* 调试页 */
+          }
+          case 4: /* 调试页 (t1-t8可用) */
           {
             char dbg[32];
             snprintf(dbg, sizeof(dbg), "P%d R%d", current_page, rx_cnt);
             HMI_tx_lock();
-            HMI_send_string("t0.txt", dbg);
+            HMI_send_string("t1.txt", dbg);
             HMI_tx_unlock();
             break;
           }
-          default: /* Home */
-            HMI_tx_lock();
-            HMI_send_string("t0.txt", "MCU OK");
-            HMI_tx_unlock();
+          default: /* Home页无控件, 不发送 */
             break;
         }
       }
@@ -264,7 +280,8 @@ int main(void)
 
     OLED_ShowString(3,1,"A:");
     OLED_ShowNum(3,3,adc2_avg,4);
-    OLED_ShowString(3,7,"      ");
+    OLED_ShowString(3,7," H");
+    OLED_ShowNum(3,9,hmi_cnt,3);
 
     OLED_ShowString(4,1,"PG");
     OLED_ShowNum(4,3,current_page,1);

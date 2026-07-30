@@ -163,7 +163,7 @@ void HMI_send_number(char *name, int num)
 void HMI_send_float(char *name, float num)
 {
   char buf[HMI_BUF_SIZE];
-  int len = snprintf(buf, sizeof(buf), "%s=%d" HMI_END, name, (int)(num * 100));
+  int len = snprintf(buf, sizeof(buf), "%s.val=%d" HMI_END, name, (int)(num * 100));
   HAL_UART_Transmit(&huart3, (uint8_t *)buf, len, 100);
 }
 
@@ -188,15 +188,15 @@ void HMI_send_val(char *name, int num)
   HAL_UART_Transmit(&huart3, (uint8_t *)buf, len, 100);
 }
 
-void HMI_curve_clear(uint8_t objid, uint8_t ch)
+void HMI_curve_clear(const char *objid, uint8_t ch)
 {
   char cmd[32];
-  int len = snprintf(cmd, sizeof(cmd), "clec %d,%d" HMI_END, objid, ch);
+  int len = snprintf(cmd, sizeof(cmd), "cle %s,%d" HMI_END, objid, ch);
   HAL_UART_Transmit(&huart3, (uint8_t *)cmd, len, 100);
 }
 
 /* addt透传: 批量发送曲线数据, 比逐点add快10倍以上 */
-uint8_t HMI_curve_addt(uint8_t objid, uint8_t ch, const uint8_t *data, uint16_t qty)
+uint8_t HMI_curve_addt(const char *objid, uint8_t ch, const uint8_t *data, uint16_t qty)
 {
   char cmd[32];
   uint32_t t0;
@@ -208,16 +208,17 @@ uint8_t HMI_curve_addt(uint8_t objid, uint8_t ch, const uint8_t *data, uint16_t 
   /* 保存RXNE中断状态并禁用, 防止TX回环字符污染RX状态机 */
   cr1 = huart3.Instance->CR1;
   __HAL_UART_DISABLE_IT(&huart3, UART_IT_RXNE);
-  /* 清RDR残留 */
+  /* 清RDR残留 + ORE, 确保接收状态干净 */
   while (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_RXNE))
   {
     volatile uint32_t tmp = huart3.Instance->RDR;
     (void)tmp;
   }
+  __HAL_UART_CLEAR_OREFLAG(&huart3);
 
   /* 1. 发送addt指令 */
   {
-    int len = snprintf(cmd, sizeof(cmd), "addt %d,%d,%d" HMI_END, objid, ch, qty);
+    int len = snprintf(cmd, sizeof(cmd), "addt %s,%d,%d" HMI_END, objid, ch, qty);
     HAL_UART_Transmit(&huart3, (uint8_t *)cmd, len, 100);
   }
 
@@ -225,13 +226,21 @@ uint8_t HMI_curve_addt(uint8_t objid, uint8_t ch, const uint8_t *data, uint16_t 
   t0 = HAL_GetTick();
   while (HAL_GetTick() - t0 < 50)
   {
+    if (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_ORE))
+      __HAL_UART_CLEAR_OREFLAG(&huart3);
     if (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_RXNE))
     {
       resp = (uint8_t)huart3.Instance->RDR;
       if (resp == 0xFE) break;
     }
   }
-  if (resp != 0xFE) goto addt_done;
+  if (resp != 0xFE)
+  {
+    /* 0xFE超时: 屏幕可能已进入透传模式, 发送qty字节0x00防止屏幕卡死 */
+    static const uint8_t dummy[1024] = {0};
+    HAL_UART_Transmit(&huart3, (uint8_t *)dummy, qty, 200);
+    goto addt_done;
+  }
 
   /* 3. 发送纯数据(qty字节, 无结束符) */
   HAL_UART_Transmit(&huart3, (uint8_t *)data, qty, 200);
@@ -241,6 +250,8 @@ uint8_t HMI_curve_addt(uint8_t objid, uint8_t ch, const uint8_t *data, uint16_t 
   resp = 0;
   while (HAL_GetTick() - t0 < 100)
   {
+    if (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_ORE))
+      __HAL_UART_CLEAR_OREFLAG(&huart3);
     if (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_RXNE))
     {
       resp = (uint8_t)huart3.Instance->RDR;
