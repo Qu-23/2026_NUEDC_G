@@ -50,13 +50,11 @@
 /* 页面: 0=主页, 1=波形, 2=参数, 3=频谱, 4=调试 */
 int8_t current_page = 0;
 uint8_t rx_cnt = 0;
-static uint16_t hmi_cnt = 0;  /* HMI刷新计数(OLED诊断) */
 
 /* HMI曲线交互参数 */
 #define PAGE1_PTS      512      /* 页面1横向像素 */
 #define PAGE2_PTS      1024     /* 页面2横向像素 */
 #define PAGE3_PTS      600      /* 页面3横向像素(频谱) */
-#define HMI_PERIOD_MS  1500     /* HMI刷新周期(题目要求2s内, 留500ms余量) */
 
 /* addt透传数据缓冲(最大PAGE2_PTS=1024点) */
 static uint8_t curve_data[PAGE2_PTS];
@@ -121,8 +119,7 @@ int main(void)
   OLED_Init();
   OLED_Clear();
 
-  /* 诊断: 复位时发送t1.txt到P4, 验证TX链路 (屏幕提前翻至P4) */
-  HMI_send_string("t1.txt", "BOOT");
+  /* 串口屏就绪, 等待主循环刷新 */
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -185,15 +182,12 @@ int main(void)
       adc2_analyzed = 0;
     }
 
-    /* HMI数据刷新 (用循环计数器替代HAL_GetTick, 后者在while(1)中不递增) */
+    /* HMI数据刷新 (循环计数器, 约1.2秒周期, 题目要求2s内留余量) */
     {
-      static uint16_t hmi_div = 0;
-      if (++hmi_div >= 15)  /* 约1.5秒(15次循环×~100ms) */
+      static uint8_t hmi_div = 0;
+      if (++hmi_div >= 12)  /* 约1.2秒(12次循环×~100ms), 2s内可完成1次刷新且留0.8s余量 */
       {
         hmi_div = 0;
-        hmi_cnt++;
-        /* 诊断: 进入switch前发送t1.txt (不加lock, 与初始化发送一致) */
-        HMI_send_string("t1.txt", "HMI RUN");
         switch (current_page)
         {
           case 1: /* 时域波形+参数 */
@@ -280,8 +274,7 @@ int main(void)
 
     OLED_ShowString(3,1,"A:");
     OLED_ShowNum(3,3,adc2_avg,4);
-    OLED_ShowString(3,7," H");
-    OLED_ShowNum(3,9,hmi_cnt,3);
+    OLED_ShowString(3,7,"      ");
 
     OLED_ShowString(4,1,"PG");
     OLED_ShowNum(4,3,current_page,1);

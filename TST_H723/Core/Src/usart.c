@@ -325,6 +325,7 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
   if (huart->Instance == USART3)
   {
     USART_RX_STA = 0;
+    HAL_UART_AbortReceive_IT(&huart3);
     HAL_UART_Receive_IT(&huart3, &rx_byte, 1);
   }
 }
