@@ -185,12 +185,12 @@ int main(void)
       adc2_analyzed = 0;
     }
 
-    /* HMI数据刷新 (周期性, 题目要求2s内完成处理和显示) */
+    /* HMI数据刷新 (用循环计数器替代HAL_GetTick, 后者在while(1)中不递增) */
     {
-      static uint32_t last_hmi = 0;
-      if (HAL_GetTick() - last_hmi >= HMI_PERIOD_MS)
+      static uint16_t hmi_div = 0;
+      if (++hmi_div >= 15)  /* 约1.5秒(15次循环×~100ms) */
       {
-        last_hmi = HAL_GetTick();
+        hmi_div = 0;
         hmi_cnt++;
         /* 诊断: 进入switch前发送t1.txt (不加lock, 与初始化发送一致) */
         HMI_send_string("t1.txt", "HMI RUN");
