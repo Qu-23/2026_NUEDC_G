@@ -181,6 +181,104 @@ void HMI_spectrum_add(int curve_id, int ch, int value)
   HAL_UART_Transmit(&huart3, (uint8_t *)buf, len, 100);
 }
 
+void HMI_send_val(char *name, int num)
+{
+  char buf[HMI_BUF_SIZE];
+  int len = snprintf(buf, sizeof(buf), "%s.val=%d" HMI_END, name, num);
+  HAL_UART_Transmit(&huart3, (uint8_t *)buf, len, 100);
+}
+
+void HMI_curve_clear(uint8_t objid, uint8_t ch)
+{
+  char cmd[32];
+  int len = snprintf(cmd, sizeof(cmd), "clec %d,%d" HMI_END, objid, ch);
+  HAL_UART_Transmit(&huart3, (uint8_t *)cmd, len, 100);
+}
+
+/* addt透传: 批量发送曲线数据, 比逐点add快10倍以上 */
+uint8_t HMI_curve_addt(uint8_t objid, uint8_t ch, const uint8_t *data, uint16_t qty)
+{
+  char cmd[32];
+  uint32_t t0;
+  uint8_t resp = 0;
+  uint32_t cr1;
+
+  if (qty > 1024 || qty == 0 || data == NULL) return 0;
+
+  /* 保存RXNE中断状态并禁用, 防止TX回环字符污染RX状态机 */
+  cr1 = huart3.Instance->CR1;
+  __HAL_UART_DISABLE_IT(&huart3, UART_IT_RXNE);
+  /* 清RDR残留 */
+  while (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_RXNE))
+  {
+    volatile uint32_t tmp = huart3.Instance->RDR;
+    (void)tmp;
+  }
+
+  /* 1. 发送addt指令 */
+  {
+    int len = snprintf(cmd, sizeof(cmd), "addt %d,%d,%d" HMI_END, objid, ch, qty);
+    HAL_UART_Transmit(&huart3, (uint8_t *)cmd, len, 100);
+  }
+
+  /* 2. 轮询等待0xFE(透传就绪), 跳过TX回环字符, 超时50ms */
+  t0 = HAL_GetTick();
+  while (HAL_GetTick() - t0 < 50)
+  {
+    if (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_RXNE))
+    {
+      resp = (uint8_t)huart3.Instance->RDR;
+      if (resp == 0xFE) break;
+    }
+  }
+  if (resp != 0xFE) goto addt_done;
+
+  /* 3. 发送纯数据(qty字节, 无结束符) */
+  HAL_UART_Transmit(&huart3, (uint8_t *)data, qty, 200);
+
+  /* 4. 轮询等待0xFD(透传结束), 超时100ms */
+  t0 = HAL_GetTick();
+  resp = 0;
+  while (HAL_GetTick() - t0 < 100)
+  {
+    if (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_RXNE))
+    {
+      resp = (uint8_t)huart3.Instance->RDR;
+      if (resp == 0xFD) break;
+    }
+  }
+
+addt_done:
+  /* 清RDR残留 + 清ORE + 恢复RXNE中断状态 */
+  while (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_RXNE))
+  {
+    volatile uint32_t tmp = huart3.Instance->RDR;
+    (void)tmp;
+  }
+  __HAL_UART_CLEAR_OREFLAG(&huart3);
+  if (cr1 & USART_CR1_RXNEIE)
+    __HAL_UART_ENABLE_IT(&huart3, UART_IT_RXNE);
+
+  return (resp == 0xFD);
+}
+
+/* 批量发送期间加RX锁, 阻断TX回环伪帧污染RX状态机 */
+void HMI_tx_lock(void)
+{
+  __HAL_UART_DISABLE_IT(&huart3, UART_IT_RXNE);
+}
+
+void HMI_tx_unlock(void)
+{
+  while (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_RXNE))
+  {
+    volatile uint32_t tmp = huart3.Instance->RDR;
+    (void)tmp;
+  }
+  __HAL_UART_CLEAR_OREFLAG(&huart3);
+  __HAL_UART_ENABLE_IT(&huart3, UART_IT_RXNE);
+}
+
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
   if (huart->Instance == USART3)

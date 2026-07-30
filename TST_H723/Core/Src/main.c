@@ -50,6 +50,15 @@
 /* 页面: 0=主页, 1=波形, 2=参数, 3=频谱, 4=调试 */
 int8_t current_page = 0;
 uint8_t rx_cnt = 0;
+
+/* HMI曲线交互参数 */
+#define CURVE_OBJ_ID   1        /* s0曲线控件的对象ID */
+#define PAGE1_PTS      512      /* 页面1横向像素 */
+#define PAGE2_PTS      1024     /* 页面2横向像素 */
+#define HMI_PERIOD_MS  1500     /* HMI刷新周期(题目要求2s内, 留500ms余量) */
+
+/* addt透传数据缓冲(最大PAGE2_PTS=1024点) */
+static uint8_t curve_data[PAGE2_PTS];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -104,6 +113,7 @@ int main(void)
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_ADC1_Init();
+  MX_ADC2_Init();
   MX_TIM2_Init();
   MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
@@ -135,12 +145,63 @@ int main(void)
         case '3': current_page = 3; break;
         case '4': current_page = 4; break;
       }
-      /* 回环测试：将收到的命令原样发回，用USB-TTL可验证收发 */
-      HAL_UART_Transmit(&huart3, USART_RX_BUF, 1, 50);
     }
 
     /* ADC1双通道采样 (256x过采样, ≈0.8ms/次) */
     ADC_Read_Channels();
+
+    /* HMI数据刷新 (周期性, 题目要求2s内完成处理和显示) */
+    {
+      static uint32_t last_hmi = 0;
+      if (HAL_GetTick() - last_hmi >= HMI_PERIOD_MS)
+      {
+        last_hmi = HAL_GetTick();
+        HMI_tx_lock();
+        switch (current_page)
+        {
+          case 1: /* 时域波形+参数 */
+          {
+            ADC2_StartCapture();  /* 8192点 @ 4.03MHz ≈ 2ms */
+            uint32_t t0 = HAL_GetTick();
+            while (!adc2_done && HAL_GetTick() - t0 < 100) {}
+            /* 降采样: 8192点 → 512点, 每16点取1个, >>4映射到8bit */
+            for (uint16_t i = 0; i < PAGE1_PTS; i++)
+              curve_data[i] = adc2_buf[i * 16] >> 4;
+            HMI_curve_clear(CURVE_OBJ_ID, 0);
+            HMI_curve_addt(CURVE_OBJ_ID, 0, curve_data, PAGE1_PTS);
+            HMI_send_val("Vpp", (int)(adc_vpp_volt * 1000));
+            HMI_send_val("Vrms", (int)(adc_vrms_volt * 1000));
+            HMI_send_val("f", 0);
+            break;
+          }
+          case 2: /* 全屏波形 */
+          {
+            ADC2_StartCapture();
+            uint32_t t0 = HAL_GetTick();
+            while (!adc2_done && HAL_GetTick() - t0 < 100) {}
+            /* 降采样: 8192点 → 1024点, 每8点取1个 */
+            for (uint16_t i = 0; i < PAGE2_PTS; i++)
+              curve_data[i] = adc2_buf[i * 8] >> 4;
+            HMI_curve_clear(CURVE_OBJ_ID, 0);
+            HMI_curve_addt(CURVE_OBJ_ID, 0, curve_data, PAGE2_PTS);
+            break;
+          }
+          case 3: /* 频谱: FFT待实现 */
+            break;
+          case 4: /* 调试页 */
+          {
+            char dbg[32];
+            snprintf(dbg, sizeof(dbg), "P%d R%d", current_page, rx_cnt);
+            HMI_send_string("t0", dbg);
+            break;
+          }
+          default: /* Home */
+            HMI_send_string("t0", "MCU OK");
+            break;
+        }
+        HMI_tx_unlock();
+      }
+    }
 
     /* 电压转换: 16bit raw → mV */
     uint16_t vpp_mv = (uint16_t)(adc_vpp_volt * 1000.0f);
