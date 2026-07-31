@@ -151,6 +151,80 @@ L4: PGx RXxxx     (页面/RX 计数)
 - L3 先后显示过：`Exxx Axxx`（UART 错误/addt 超时）→ `Sxxx Pxxx txx Kxxx`（SYSCLK/PCLK1/采样时间/bin）→ `O=xxx Kyyy`（当前）
 - 清理：去掉 BOOT、HMI RUN、hmi_cnt 等诊断打印
 
+### 9. 采样率翻倍与定性功能达成 ✅
+
+**验证现象：** ADC 时钟改至 80MHz 后，测得的基频值全部减半——虽然是错误信息（FFT_FS 未同步更新），但充分说明采样率成功翻倍，从 2.015MHz 提升到 4.03MHz。
+
+**根因确认：** 隔触发采样已解除。
+- 80MHz ADC 时钟下转换时间 175ns < 触发周期 248ns
+- 每次触发时上一次转换已完成，不再跳过触发
+- 实际采样率 = 触发频率 = 4.02985MHz
+
+**修复：** [fft.h](file:///c:/Users/kafel/Desktop/PROJ_EX/2026_NUEDC/TST_H723/Core/Inc/fft.h) 中 `FFT_FS` 从 2015000.0f 更新为 4029850.0f，频率测量恢复正常。
+
+**定性功能达成：**
+- 题目上限频点（500kHz）波形基本平滑（每周期点数翻倍至 8 点）
+- 频谱图规律与理论吻合
+- 1T/3T 波形自适应显示正常
+- 5 页面 HMI 交互稳定
+
+**Vpp 峰峰值计算已起步：** [main.c](file:///c:/Users/kafel/Desktop/PROJ_EX/2026_NUEDC/TST_H723/Core/Src/main.c) case1 中利用 `adc2_max - adc2_min` 计算 ADC 端峰峰值（mV）并发送到 HMI 的 `Vpp.val` 控件。增益还原待后续补充。
+
+**下一步转入定量指标实现。**
+
+### 10. 定量指标 P0 完成 ✅
+
+**P0-1 真有效值软件计算：**
+- [main.c](file:///c:/Users/kafel/Desktop/PROJ_EX/2026_NUEDC/TST_H723/Core/Src/main.c#L187-L196) 缓冲区分析中实现
+- `Urms = sqrt((1/N)*Σ(xi-mean)²)`，用 uint64 累加避免溢出
+- 减去直流分量 `adc2_avg` 再平方，去除 DC 偏置
+- 适用于任意波形（基波+0~2 个谐波均准确）
+- **验证结果：** 对比示波器周期有效值，多数点位误差 < 1mV，精度极高
+
+**P0-2 Vpp 增益还原：**
+- 前级总增益 5.78 倍（线性性已验证，含模拟低通衰减）
+- `FRONT_GAIN` 宏定义移至 [fft.h](file:///c:/Users/kafel/Desktop/PROJ_EX/2026_NUEDC/TST_H723/Core/Inc/fft.h) 统一管理
+- Vpp/Vrms 均还原为信号源端电压（mV）
+- **验证结果：** HMI 显示 Vpp 与示波器 math 模式精确理论值所差无几
+
+**P0-3 OLED 显示改造：**
+- 删除无用调试信息（H/L/OVR 等）
+- 改为软件/硬件 Urms 对比显示，方便精度对比
+```
+L1: S:xxxx H:xxxx  (软件Urms / 硬件Urms, 信号源端mV)
+L2: P:xxxx         (Vpp mV, 已还原增益)
+L3: f:xxxx K:xxxx  (基频kHz / bin索引)
+L4: PGx RXxxx      (页面/RX计数)
+```
+- **结论：** 软件 Urms 精度更高，但硬件检波可用作备用。暂保留软件计算
+
+### 11. 频谱绝对高度校准 ✅
+
+**问题：** 原归一化方式以全局 max_mag 为满量程（相对高度），无法体现实际幅值的绝对大小。当谐波幅值与基频相同时，两根谱线高度接近，但无法直接读出幅值。
+
+**改进：** 改为绝对高度——FFT 幅值转换为信号源端 mV，直接对应曲线像素高度。
+- [fft.c](file:///c:/Users/kafel/Desktop/PROJ_EX/2026_NUEDC/TST_H723/Core/Src/fft.c#L138-L143) 降采样归一化改为：
+  ```c
+  float amp_mv = FFT_MAG_TO_MV(max_in_range);
+  uint32_t val = (uint32_t)amp_mv;
+  if (val > 250) val = 250;
+  if (val < 20) val = 0;  /* 噪声截断 */
+  ```
+- [fft.h](file:///c:/Users/kafel/Desktop/PROJ_EX/2026_NUEDC/TST_H723/Core/Inc/fft.h) 新增统一宏：
+  ```c
+  #define FFT_MAG_TO_MV(mag)  ((mag) * 2.0f / FFT_N * 2.0f * 3.3f / 4096.0f * 1000.0f / FRONT_GAIN)
+  ```
+- 对应关系：50mV 信号 → 50 像素高度，250mV 信号 → 250 像素高度（顶格）
+- `FFT_GetAmplitude` 也改用统一宏，保证幅值计算一致性
+- **效果：** 谱线高度直接反映实际幅值，符合题目定性显示要求
+
+### 12. 第3项抗干扰硬件确认 ✅
+
+**关键信息：** 前级电路中已有模拟低通滤波器，5.78 的系统增益包含滤波电路的衰减在内。
+- **结论：** 当前测量已是"连带要求3一同实现"的状态
+- uJ（200mV, fJ≥1MHz）由硬件低通滤除，无需软件数字滤波
+- 后续只需验证加 1MHz 干扰时测量精度是否仍达标
+
 ## 当前未解决问题
 
 ### 问题 1：O 值始终为 0（OVR 计数无自增）
@@ -218,7 +292,7 @@ float capture_ms = dwt_cycles / 540000.0f;  /* SYSCLK=540MHz */
 | PLL2 | M=32, N=80, P=2 → 80MHz |
 | ADC2 时钟 | 80MHz (ASYNC_DIV1, BoostMode 自动最高档) |
 | TIM2 触发 | 4.0298MHz (PSC=0, Period=66) |
-| 实际采样率 | 2.015MHz (隔触发,待 DWT 复测) |
+| 实际采样率 | 4.02985MHz (隔触发已解除) |
 | ADC1 | PA0(Vrms) 16bit 过采样 |
 | ADC2 | PA6 12bit 高速 + DMA |
 | USART3 | PB10(TX)/PB11(RX), 115200bps |
@@ -235,14 +309,24 @@ float capture_ms = dwt_cycles / 540000.0f;  /* SYSCLK=540MHz */
 | 004515b | ADC1 + 串口屏 RX/PG 联动里程碑 (dev 分支) |
 | 0947541 | 清理诊断代码, HMI 周期 0.9s, UART ErrorCallback 修复 |
 | c2bc3d8 | HMI_tx_unlock 清空状态机, 添加 E/A 诊断指标 |
-| (待提交) | FFT 频谱分析, 频率测量修复, 1T/3T 自适应, 镜像修复, ADC 时钟 80MHz |
+| 6239286 | OVR 诊断+波形镜像修复+频谱 720 点 |
+| dcd6493 | 采样率翻倍: ADC 时钟 80MHz 解除隔触发, FFT_FS=4.03MHz, Vpp 计算 |
+| 537a751 | P0: 真有效值软件计算+Vpp/Vrms 增益还原(5.78 倍) |
+| 8029b7d | OLED 改 Urms 对比+频谱归一化 20~250 噪声截断 |
+| 3ee1d21 | 频谱绝对高度: FFT 幅值转 mV 对应像素, FRONT_GAIN 移至 fft.h |
 
 ## 下一步计划
 
-1. [ ] 用 DWT 精确测量 ADC2 采样时间，确认实际采样率（4.03MHz 还是 2.015MHz）
-2. [ ] 若实际 4.03MHz：更新 `FFT_FS = 4030000.0f`，高频失真自然缓解
-3. [ ] 若实际 2.015MHz：排查 PLL2 启动状态、BoostMode 寄存器实际值
-4. [ ] 实现三谱线插值补偿非相干采样误差，提高频率/幅值精度
-5. [ ] 手动计算峰峰值（替代 ADC1 Vpp 通道），还原放大增益
-6. [ ] 频谱刻度标定（HMI 端 0~1MHz 线性刻度）
-7. [ ] 优化 OLED t 值跳变（HAL_GetTick 精度问题）
+### 已完成（锁定）
+1. [x] 采样率翻倍确认: ADC 时钟 80MHz 解除隔触发, FFT_FS=4.02985MHz
+2. [x] Vpp 峰峰值计算 + 增益还原(5.78 倍), 验证通过
+3. [x] 真有效值软件计算, 精度 < 1mV, 验证通过
+4. [x] 频谱绝对高度校准(50mV→50px, 250mV→250px)
+5. [x] 第3项抗干扰硬件确认(前级模拟低通已含在 5.78 增益内)
+
+### 待实现
+6. [ ] P0-3: FFT 分量幅值校准(vb/v1/v2 发送到 HMI, 验证误差 ≤5mV)
+7. [ ] 三谱线插值补偿非相干采样误差, 提高频率/幅值精度
+8. [ ] 频谱刻度标定 (HMI 端 0~2MHz 线性刻度)
+9. [ ] 第3项验证: 加 1MHz 干扰时测量精度是否仍达标
+10. [ ] 多组数据全量验证(频率×幅值矩阵)
