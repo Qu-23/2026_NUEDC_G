@@ -37,13 +37,14 @@ typedef struct {
 } cplx_float_t;
 
 /**
- * @brief  FFT处理: 从ADC2原始数据计算频谱
+ * @brief  FFT处理+软件滤波: 从ADC2原始数据计算滤波后频谱和时域波形
  * @param  adc_data: ADC2采样数据 (uint16_t, 8192点)
- * @param  spectrum: 输出频谱幅值 (uint8_t, 600点, 0~255)
+ * @param  spectrum: 输出频谱幅值 (uint8_t, 600点, 0~255), 已滤波
  * @param  spec_pts: 频谱曲线点数 (通常600)
+ * @param  filtered: 输出滤波后时域数据 (uint16_t, 8192点), NULL则不输出
  * @retval 基频bin索引 (0表示未找到)
  */
-uint32_t FFT_Process(const uint16_t *adc_data, uint8_t *spectrum, uint16_t spec_pts);
+uint32_t FFT_Process(const uint16_t *adc_data, uint8_t *spectrum, uint16_t spec_pts, uint16_t *filtered);
 
 /**
  * @brief  从FFT结果计算基频频率

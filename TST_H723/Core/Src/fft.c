@@ -74,8 +74,25 @@ static void fft_cplx(cplx_float_t *x, uint32_t n)
     }
 }
 
+/* ===== 基-2复数IFFT (复用fft_cplx: IFFT = conj(FFT(conj(x)))/N) ===== */
+static void ifft_cplx(cplx_float_t *x, uint32_t n)
+{
+    /* 1. 取共轭 */
+    for (uint32_t i = 0; i < n; i++)
+        x[i].im = -x[i].im;
+    /* 2. FFT */
+    fft_cplx(x, n);
+    /* 3. 取共轭并除以N */
+    float inv_n = 1.0f / (float)n;
+    for (uint32_t i = 0; i < n; i++)
+    {
+        x[i].re *= inv_n;
+        x[i].im = -x[i].im * inv_n;
+    }
+}
+
 /* ===== FFT主处理: ADC数据 → 频谱曲线 + 基频bin ===== */
-uint32_t FFT_Process(const uint16_t *adc_data, uint8_t *spectrum, uint16_t spec_pts)
+uint32_t FFT_Process(const uint16_t *adc_data, uint8_t *spectrum, uint16_t spec_pts, uint16_t *filtered)
 {
     /* 1. 预计算汉宁窗 (仅首次) */
     if (!win_inited)
@@ -101,7 +118,33 @@ uint32_t FFT_Process(const uint16_t *adc_data, uint8_t *spectrum, uint16_t spec_
     /* 4. 执行FFT */
     fft_cplx(fft_buf, FFT_N);
 
-    /* 5. 计算前N/2点幅值 */
+    /* 4.5 软件滤波: 软过渡衰减 0.9MHz~1.1MHz 分量 (Gibbs振铃缓解)
+       实信号FFT共轭对称: fft_buf[N-k] = conj(fft_buf[k]), 需同时处理 */
+    {
+        uint32_t k_cut = (uint32_t)(900000.0f / FFT_DF);   /* 0.9MHz 开始衰减 */
+        uint32_t k_stop = (uint32_t)(1100000.0f / FFT_DF); /* 1.1MHz 完全截止 */
+        if (k_stop > FFT_N_HALF) k_stop = FFT_N_HALF;
+        if (k_cut >= k_stop) k_cut = k_stop > 0 ? k_stop - 1 : 0;
+        for (uint32_t k = k_cut; k < FFT_N_HALF; k++)
+        {
+            float gain;
+            if (k < k_stop)
+                gain = 1.0f - (float)(k - k_cut) / (float)(k_stop - k_cut);
+            else
+                gain = 0.0f;
+            fft_buf[k].re *= gain;
+            fft_buf[k].im *= gain;
+            /* 共轭对称: N-k 分量 */
+            uint32_t k_sym = FFT_N - k;
+            if (k_sym != k)
+            {
+                fft_buf[k_sym].re *= gain;
+                fft_buf[k_sym].im *= gain;
+            }
+        }
+    }
+
+    /* 5. 计算前N/2点幅值 (用滤波后的fft_buf) */
     for (uint32_t k = 0; k < FFT_N_HALF; k++)
     {
         fft_mag[k] = sqrtf(fft_buf[k].re * fft_buf[k].re + fft_buf[k].im * fft_buf[k].im);
@@ -150,6 +193,21 @@ uint32_t FFT_Process(const uint16_t *adc_data, uint8_t *spectrum, uint16_t spec_
             if (val > 250) val = 250;
             if (val < 30) val = 0;  /* V_peak<15mV(即Upp<30mV)截断, 避免削掉小信号分量 */
             spectrum[spec_pts - 1 - i] = (uint8_t)val;
+        }
+    }
+
+    /* 8. IFFT回时域, 输出滤波后波形 (用于Vpp/Urms/时域显示)
+       IFFT后fft_buf[i].re是 (x[n]-dc)*w[n] 的滤波后版本
+       加回dc: 中间区域(w≈1)≈x[n]滤波后值; 两端(w≈0)趋近dc电平 */
+    if (filtered != NULL)
+    {
+        ifft_cplx(fft_buf, FFT_N);
+        for (uint32_t i = 0; i < FFT_N; i++)
+        {
+            float val = fft_buf[i].re + dc;
+            if (val < 0.0f) val = 0.0f;
+            if (val > 4095.0f) val = 4095.0f;
+            filtered[i] = (uint16_t)val;
         }
     }
 

@@ -62,6 +62,9 @@ uint8_t wave_mode = 0;  /* 0=1T(默认), 1=3T, HMI发送't'切换 */
 /* addt透传数据缓冲(最大PAGE2_PTS=1024点) */
 static uint8_t curve_data[PAGE2_PTS];
 
+/* 滤波后时域数据(FFT+IFFT输出, 放DMA_BUF段避免D-Cache问题) */
+uint16_t filtered_buf[ADC2_BUF_SIZE] __attribute__((section("DMA_BUF")));
+
 /* FFT诊断变量 (OLED第三行显示) */
 uint32_t fft_k_peak = 0;    /* 基频bin索引 */
 float fft_freq_hz = 0.0f;   /* 基频频率(Hz) */
@@ -169,11 +172,15 @@ int main(void)
     static uint32_t trig_pos = 0;  /* 上升过零触发点(波形示波器风格稳定显示) */
     if (adc2_done && !adc2_analyzed)
     {
+      /* FFT+软件滤波: 输出滤波后时域数据(filtered_buf) + 频谱(curve_data) + 基频 */
+      fft_k_peak = FFT_Process(adc2_buf, curve_data, PAGE3_PTS, filtered_buf);
+      fft_freq_hz = FFT_GetFrequency(fft_k_peak);
+
       uint32_t sum = 0;
       uint16_t mx = 0, mn = 4095;
       for (uint16_t i = 0; i < ADC2_BUF_SIZE; i++)
       {
-        uint16_t v = adc2_buf[i];
+        uint16_t v = filtered_buf[i];
         if (v > mx) mx = v;
         if (v < mn) mn = v;
         sum += v;
@@ -186,7 +193,7 @@ int main(void)
       uint64_t sum_sq = 0;
       for (uint16_t i = 0; i < ADC2_BUF_SIZE; i++)
       {
-        int32_t diff = (int32_t)adc2_buf[i] - (int32_t)adc2_avg;
+        int32_t diff = (int32_t)filtered_buf[i] - (int32_t)adc2_avg;
         sum_sq += (uint64_t)(diff * diff);
       }
       float rms_raw = sqrtf((float)sum_sq / ADC2_BUF_SIZE);
@@ -198,8 +205,8 @@ int main(void)
       trig_pos = 0;
       for (uint32_t i = ADC2_BUF_SIZE / 4; i < ADC2_BUF_SIZE * 3 / 4 - 1; i++)
       {
-        int32_t s0 = (int32_t)adc2_buf[i] - mid;
-        int32_t s1 = (int32_t)adc2_buf[i + 1] - mid;
+        int32_t s0 = (int32_t)filtered_buf[i] - mid;
+        int32_t s1 = (int32_t)filtered_buf[i + 1] - mid;
         if (s0 <= 0 && s1 > 0) { trig_pos = i; break; }
       }
       adc2_analyzed = 1;
@@ -216,21 +223,12 @@ int main(void)
       {
         hmi_div = 0;
 
-        /* FFT预处理: case1需要频率, case3需要频谱+谐波幅值 */
-        if (current_page == 1 || current_page == 3)
-        {
-          uint32_t t0 = HAL_GetTick();
-          while (!adc2_done && HAL_GetTick() - t0 < 10) {}
-          /* FFT: 8192点 → 频谱600点存入curve_data + 基频bin索引 */
-          fft_k_peak = FFT_Process(adc2_buf, curve_data, PAGE3_PTS);
-          fft_freq_hz = FFT_GetFrequency(fft_k_peak);
-        }
-
+        /* FFT+滤波已在缓冲区分析时完成, 此处直接用结果 */
         switch (current_page)
         {
           case 1: /* 时域波形+参数, 自适应1T/3T周期显示 */
           {
-            /* 根据基频从adc2_buf提取1或3个完整周期, 线性插值到512点 */
+            /* 根据基频从filtered_buf提取1或3个完整周期, 线性插值到512点 */
             if (fft_freq_hz > 100.0f)
             {
               float points_per_cycle = FFT_FS / fft_freq_hz;
@@ -242,8 +240,8 @@ int main(void)
                 uint32_t idx0 = (uint32_t)pos;
                 float frac = pos - idx0;
                 /* 起点偏移trig_pos: 上升过零触发同步, 波形稳定显示 */
-                uint16_t v0 = adc2_buf[(trig_pos + idx0) % ADC2_BUF_SIZE];
-                uint16_t v1 = adc2_buf[(trig_pos + idx0 + 1) % ADC2_BUF_SIZE];
+                uint16_t v0 = filtered_buf[(trig_pos + idx0) % ADC2_BUF_SIZE];
+                uint16_t v1 = filtered_buf[(trig_pos + idx0 + 1) % ADC2_BUF_SIZE];
                 float v = v0 + (v1 - v0) * frac;
                 curve_data[PAGE1_PTS-1-i] = (uint8_t)((uint16_t)v >> 4);  /* 反转索引修复HMI镜像 */
               }
@@ -252,7 +250,7 @@ int main(void)
             {
               /* 频率无效时降级: 直接降采样 */
               for (uint16_t i = 0; i < PAGE1_PTS; i++)
-                curve_data[PAGE1_PTS-1-i] = adc2_buf[i * 16] >> 4;
+                curve_data[PAGE1_PTS-1-i] = filtered_buf[i * 16] >> 4;
             }
             HMI_tx_lock();
             HMI_curve_clear("s0.id", 0);
@@ -267,7 +265,7 @@ int main(void)
           {
             uint32_t t0 = HAL_GetTick();
             while (!adc2_done && HAL_GetTick() - t0 < 10) {}
-            /* 根据基频从adc2_buf提取1或3个完整周期, 线性插值到1024点 */
+            /* 根据基频从filtered_buf提取1或3个完整周期, 线性插值到1024点 */
             if (fft_freq_hz > 100.0f)
             {
               float points_per_cycle = FFT_FS / fft_freq_hz;
@@ -279,8 +277,8 @@ int main(void)
                 uint32_t idx0 = (uint32_t)pos;
                 float frac = pos - idx0;
                 /* 起点偏移trig_pos: 上升过零触发同步, 波形稳定显示 */
-                uint16_t v0 = adc2_buf[(trig_pos + idx0) % ADC2_BUF_SIZE];
-                uint16_t v1 = adc2_buf[(trig_pos + idx0 + 1) % ADC2_BUF_SIZE];
+                uint16_t v0 = filtered_buf[(trig_pos + idx0) % ADC2_BUF_SIZE];
+                uint16_t v1 = filtered_buf[(trig_pos + idx0 + 1) % ADC2_BUF_SIZE];
                 float v = v0 + (v1 - v0) * frac;
                 curve_data[PAGE2_PTS-1-i] = (uint8_t)((uint16_t)v >> 4);  /* 反转索引修复HMI镜像 */
               }
@@ -289,7 +287,7 @@ int main(void)
             {
               /* 频率无效时降级: 直接降采样 */
               for (uint16_t i = 0; i < PAGE2_PTS; i++)
-                curve_data[PAGE2_PTS-1-i] = adc2_buf[i * 8] >> 4;
+                curve_data[PAGE2_PTS-1-i] = filtered_buf[i * 8] >> 4;
             }
             HMI_tx_lock();
             HMI_curve_clear("s0.id", 0);
