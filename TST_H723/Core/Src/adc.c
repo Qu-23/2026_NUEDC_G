@@ -311,8 +311,14 @@ void DMA1_Stream1_IRQHandler(void)
 }
 
 /* ADC中断服务 (STM32H723: ADC1/ADC2共享ADC_IRQn, 处理OVR等) */
+volatile uint32_t ovr_cnt = 0;  /* OVR(过冲)计数, 诊断隔触发采样 */
 void ADC_IRQHandler(void)
 {
+  if (__HAL_ADC_GET_FLAG(&hadc2, ADC_FLAG_OVR))
+  {
+    ovr_cnt++;
+    __HAL_ADC_CLEAR_FLAG(&hadc2, ADC_FLAG_OVR);
+  }
   HAL_ADC_IRQHandler(&hadc2);
 }
 /* USER CODE END 1 */

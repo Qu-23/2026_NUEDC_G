@@ -56,7 +56,7 @@ uint8_t wave_mode = 0;  /* 0=1T(默认), 1=3T, HMI发送't'切换 */
 /* HMI曲线交互参数 */
 #define PAGE1_PTS      512      /* 页面1横向像素 */
 #define PAGE2_PTS      1024     /* 页面2横向像素 */
-#define PAGE3_PTS      600      /* 页面3横向像素(频谱) */
+#define PAGE3_PTS      720      /* 页面3横向像素(频谱) */
 
 /* addt透传数据缓冲(最大PAGE2_PTS=1024点) */
 static uint8_t curve_data[PAGE2_PTS];
@@ -223,14 +223,15 @@ int main(void)
                 float frac = pos - idx0;
                 uint16_t v0 = adc2_buf[idx0 % ADC2_BUF_SIZE];
                 uint16_t v1 = adc2_buf[(idx0 + 1) % ADC2_BUF_SIZE];
-                curve_data[i] = (uint8_t)((v0 + (v1 - v0) * frac) >> 4);
+                float v = v0 + (v1 - v0) * frac;
+                curve_data[PAGE1_PTS-1-i] = (uint8_t)((uint16_t)v >> 4);  /* 反转索引修复HMI镜像 */
               }
             }
             else
             {
               /* 频率无效时降级: 直接降采样 */
               for (uint16_t i = 0; i < PAGE1_PTS; i++)
-                curve_data[i] = adc2_buf[i * 16] >> 4;
+                curve_data[PAGE1_PTS-1-i] = adc2_buf[i * 16] >> 4;
             }
             HMI_tx_lock();
             HMI_curve_clear("s0.id", 0);
@@ -240,13 +241,33 @@ int main(void)
             HMI_tx_unlock();
             break;
           }
-          case 2: /* 全屏波形 */
+          case 2: /* 全屏波形, 自适应1T/3T周期显示 */
           {
             uint32_t t0 = HAL_GetTick();
             while (!adc2_done && HAL_GetTick() - t0 < 10) {}
-            /* 降采样: 8192点 → 1024点, 每8点取1个 */
-            for (uint16_t i = 0; i < PAGE2_PTS; i++)
-              curve_data[i] = adc2_buf[i * 8] >> 4;
+            /* 根据基频从adc2_buf提取1或3个完整周期, 线性插值到1024点 */
+            if (fft_freq_hz > 100.0f)
+            {
+              float points_per_cycle = FFT_FS / fft_freq_hz;
+              uint16_t cycles = wave_mode ? 3 : 1;  /* 0=1T, 1=3T */
+              float step = points_per_cycle * cycles / PAGE2_PTS;
+              for (uint16_t i = 0; i < PAGE2_PTS; i++)
+              {
+                float pos = i * step;
+                uint32_t idx0 = (uint32_t)pos;
+                float frac = pos - idx0;
+                uint16_t v0 = adc2_buf[idx0 % ADC2_BUF_SIZE];
+                uint16_t v1 = adc2_buf[(idx0 + 1) % ADC2_BUF_SIZE];
+                float v = v0 + (v1 - v0) * frac;
+                curve_data[PAGE2_PTS-1-i] = (uint8_t)((uint16_t)v >> 4);  /* 反转索引修复HMI镜像 */
+              }
+            }
+            else
+            {
+              /* 频率无效时降级: 直接降采样 */
+              for (uint16_t i = 0; i < PAGE2_PTS; i++)
+                curve_data[PAGE2_PTS-1-i] = adc2_buf[i * 8] >> 4;
+            }
             HMI_tx_lock();
             HMI_curve_clear("s0.id", 0);
             HMI_curve_addt("s0.id", 0, curve_data, PAGE2_PTS);
@@ -300,11 +321,11 @@ int main(void)
     OLED_ShowString(2,7," L:");
     OLED_ShowNum(2,10,adc2_min,4);
 
-    /* L3: 采样时间诊断 t=ADC2采样耗时(ms) K=基频bin */
-    OLED_ShowString(3,1,"t");
-    OLED_ShowNum(3,2,adc2_capture_ms,2);
-    OLED_ShowString(3,5,"K");
-    OLED_ShowNum(3,6,fft_k_peak,4);
+    /* L3: O=OVR计数(诊断隔触发) K=基频bin */
+    OLED_ShowString(3,1,"O");
+    OLED_ShowNum(3,2,ovr_cnt,3);
+    OLED_ShowString(3,6,"K");
+    OLED_ShowNum(3,7,fft_k_peak,4);
 
     OLED_ShowString(4,1,"PG");
     OLED_ShowNum(4,3,current_page,1);
