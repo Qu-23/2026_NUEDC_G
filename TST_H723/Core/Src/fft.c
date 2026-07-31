@@ -116,19 +116,29 @@ uint32_t FFT_Process(const uint16_t *adc_data, uint8_t *spectrum, uint16_t spec_
         }
     }
 
-    /* 6. 降采样到spec_pts点, 归一化到0~255 */
+    /* 6. 降采样到spec_pts点, 归一化到0~255 (取区间最大值, 避免漏掉尖峰) */
     if (spectrum != NULL && spec_pts > 0)
     {
+        uint32_t bin_per_pt = FFT_N_HALF / spec_pts;
+        if (bin_per_pt == 0) bin_per_pt = 1;
         for (uint16_t i = 0; i < spec_pts; i++)
         {
-            uint32_t idx = (uint32_t)i * FFT_N_HALF / spec_pts;
-            if (idx >= FFT_N_HALF)
-                idx = FFT_N_HALF - 1;
-            /* 归一化: 以max_mag为满量程255 */
-            uint32_t val = (uint32_t)(fft_mag[idx] * 255.0f / max_mag);
-            if (val > 255)
-                val = 255;
-            spectrum[i] = (uint8_t)val;
+            uint32_t start = (uint32_t)i * bin_per_pt;
+            uint32_t end = start + bin_per_pt;
+            if (end > FFT_N_HALF) end = FFT_N_HALF;
+
+            /* 找区间内最大值 */
+            float max_in_range = 0.0f;
+            for (uint32_t k = start; k < end; k++)
+            {
+                if (fft_mag[k] > max_in_range)
+                    max_in_range = fft_mag[k];
+            }
+
+            /* 归一化: 以max_mag为满量程255, 翻转数组(HMI显示从右到左镜像) */
+            uint32_t val = (uint32_t)(max_in_range * 255.0f / max_mag);
+            if (val > 255) val = 255;
+            spectrum[spec_pts - 1 - i] = (uint8_t)val;
         }
     }
 

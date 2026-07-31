@@ -50,11 +50,11 @@ void MX_ADC1_Init(void)
   hadc1.Instance = ADC1;
   hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV2;
   hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-  hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE;
+  hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
   hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
   hadc1.Init.LowPowerAutoWait = DISABLE;
   hadc1.Init.ContinuousConvMode = DISABLE;
-  hadc1.Init.NbrOfConversion = 2;
+  hadc1.Init.NbrOfConversion = 1;  /* Vpp通道已注释, 仅剩Vrms单通道 */
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
@@ -79,25 +79,15 @@ void MX_ADC1_Init(void)
     Error_Handler();
   }
 
-  /** Configure Regular Channel 1: PA1/INP17 - Vpp
+  /** Configure Regular Channel 1: PA0/INP16 - Vrms (Vpp PA1/INP17已注释)
   */
-  sConfig.Channel = ADC_CHANNEL_17;
+  sConfig.Channel = ADC_CHANNEL_16;
   sConfig.Rank = ADC_REGULAR_RANK_1;
   sConfig.SamplingTime = ADC_SAMPLETIME_64CYCLES_5;
   sConfig.SingleDiff = ADC_SINGLE_ENDED;
   sConfig.OffsetNumber = ADC_OFFSET_NONE;
   sConfig.Offset = 0;
   sConfig.OffsetSignedSaturation = DISABLE;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Regular Channel 2: PA0/INP16 - Vrms
-  */
-  sConfig.Channel = ADC_CHANNEL_16;
-  sConfig.Rank = ADC_REGULAR_RANK_2;
-  sConfig.SamplingTime = ADC_SAMPLETIME_64CYCLES_5;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -177,10 +167,9 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef* adcHandle)
 
     __HAL_RCC_GPIOA_CLK_ENABLE();
     /**ADC1 GPIO Configuration
-    PA1     ------> ADC1_INP17 (Vpp)
-    PA0     ------> ADC1_INP16 (Vrms)
+    PA0     ------> ADC1_INP16 (Vrms)  (Vpp PA1已注释)
     */
-    GPIO_InitStruct.Pin = GPIO_PIN_1 | GPIO_PIN_0;
+    GPIO_InitStruct.Pin = GPIO_PIN_0;
     GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
@@ -245,10 +234,9 @@ void HAL_ADC_MspDeInit(ADC_HandleTypeDef* adcHandle)
     __HAL_RCC_ADC12_CLK_DISABLE();
 
     /**ADC1 GPIO Configuration
-    PA1     ------> ADC1_INP17 (Vpp)
-    PA0     ------> ADC1_INP16 (Vrms)
+    PA0     ------> ADC1_INP16 (Vrms)  (Vpp PA1已注释)
     */
-    HAL_GPIO_DeInit(GPIOA, GPIO_PIN_1 | GPIO_PIN_0);
+    HAL_GPIO_DeInit(GPIOA, GPIO_PIN_0);
 
   /* USER CODE BEGIN ADC1_MspDeInit 1 */
 
@@ -270,24 +258,18 @@ void HAL_ADC_MspDeInit(ADC_HandleTypeDef* adcHandle)
 }
 
 /* USER CODE BEGIN 1 */
-uint16_t adc_vpp = 0;   /* PA1/INP17 峰值检波, 16bit */
 uint16_t adc_vrms = 0;  /* PA0/INP16 有效值检波, 16bit */
-float adc_vpp_volt = 0.0f;
 float adc_vrms_volt = 0.0f;
 
 void ADC_Read_Channels(void)
 {
   HAL_ADC_Start(&hadc1);
-  /* CH1: Vpp (PA1/INP17), 256x过采样 ≈ 0.4ms */
-  HAL_ADC_PollForConversion(&hadc1, 10);
-  adc_vpp = HAL_ADC_GetValue(&hadc1);
-  /* CH2: Vrms (PA0/INP16), 256x过采样 ≈ 0.4ms */
+  /* CH1: Vrms (PA0/INP16), 256x过采样 ≈ 0.4ms */
   HAL_ADC_PollForConversion(&hadc1, 10);
   adc_vrms = HAL_ADC_GetValue(&hadc1);
   HAL_ADC_Stop(&hadc1);
 
   /* 16bit过采样: raw范围0~65535, VREF=3.3V */
-  adc_vpp_volt = (float)adc_vpp * 3.3f / 65536.0f;
   adc_vrms_volt = (float)adc_vrms * 3.3f / 65536.0f;
 }
 
