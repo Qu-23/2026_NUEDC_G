@@ -305,9 +305,9 @@ int main(void)
             /* curve_data已被FFT_Process填充为频谱数据(600点) */
             /* 调试: 直接发送谱线绝对高度对应的幅值(mV), 与谱线像素高度数值一致
                FFT_GetAmplitude返回V, ×1000还原为mV (与FFT_MAG_TO_MV同一口径) */
-            uint16_t vb_mv = (uint16_t)(FFT_GetAmplitude(fft_k_peak, 1) * 1000.0f);
-            uint16_t v1_mv = (uint16_t)(FFT_GetAmplitude(fft_k_peak, 2) * 1000.0f);
-            uint16_t v2_mv = (uint16_t)(FFT_GetAmplitude(fft_k_peak, 3) * 1000.0f);
+            uint16_t vb_mv = (uint16_t)(FFT_GetAmplitude(fft_k_peak, 1) * 1000.0f + 4.0f);  /* +4mV补偿(实测稳定偏小) */
+            uint16_t v1_mv = (uint16_t)(FFT_GetAmplitude(fft_k_peak, 2) * 1000.0f + 4.0f);
+            uint16_t v2_mv = (uint16_t)(FFT_GetAmplitude(fft_k_peak, 3) * 1000.0f + 4.0f);
             HMI_tx_lock();
             HMI_curve_clear("s0.id", 0);
             HMI_curve_addt("s0.id", 0, curve_data, PAGE3_PTS);
