@@ -26,76 +26,8 @@
 
 /* USER CODE END 0 */
 
-ADC_HandleTypeDef hadc1;
 ADC_HandleTypeDef hadc2;
 static DMA_HandleTypeDef hdma_adc2;
-
-/* ADC1 init function */
-void MX_ADC1_Init(void)
-{
-
-  /* USER CODE BEGIN ADC1_Init 0 */
-
-  /* USER CODE END ADC1_Init 0 */
-
-  ADC_MultiModeTypeDef multimode = {0};
-  ADC_ChannelConfTypeDef sConfig = {0};
-
-  /* USER CODE BEGIN ADC1_Init 1 */
-
-  /* USER CODE END ADC1_Init 1 */
-
-  /** Common config
-  */
-  hadc1.Instance = ADC1;
-  hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV2;
-  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-  hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
-  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
-  hadc1.Init.LowPowerAutoWait = DISABLE;
-  hadc1.Init.ContinuousConvMode = DISABLE;
-  hadc1.Init.NbrOfConversion = 1;  /* Vpp通道已注释, 仅剩Vrms单通道 */
-  hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
-  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
-  hadc1.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
-  hadc1.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;
-  hadc1.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
-  hadc1.Init.OversamplingMode = ENABLE;
-  hadc1.Init.Oversampling.Ratio = 256;
-  hadc1.Init.Oversampling.RightBitShift = LL_ADC_OVS_SHIFT_RIGHT_4;
-  hadc1.Init.Oversampling.TriggeredMode = ADC_TRIGGEREDMODE_SINGLE_TRIGGER;
-  hadc1.Init.Oversampling.OversamplingStopReset = LL_ADC_OVS_GRP_REGULAR_CONTINUED;
-  if (HAL_ADC_Init(&hadc1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure the ADC multi-mode
-  */
-  multimode.Mode = ADC_MODE_INDEPENDENT;
-  if (HAL_ADCEx_MultiModeConfigChannel(&hadc1, &multimode) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Regular Channel 1: PA0/INP16 - Vrms (Vpp PA1/INP17已注释)
-  */
-  sConfig.Channel = ADC_CHANNEL_16;
-  sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_64CYCLES_5;
-  sConfig.SingleDiff = ADC_SINGLE_ENDED;
-  sConfig.OffsetNumber = ADC_OFFSET_NONE;
-  sConfig.Offset = 0;
-  sConfig.OffsetSignedSaturation = DISABLE;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN ADC1_Init 2 */
-  HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET_LINEARITY, ADC_SINGLE_ENDED);
-  /* USER CODE END ADC1_Init 2 */
-}
 
 /* ADC2 init function - PA6/INP3, 12bit高速, TIM2 TRGO触发, DMA */
 void MX_ADC2_Init(void)
@@ -139,17 +71,17 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef* adcHandle)
 
   GPIO_InitTypeDef GPIO_InitStruct = {0};
   RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
-  if(adcHandle->Instance==ADC1)
+  if(adcHandle->Instance==ADC2)
   {
-  /* USER CODE BEGIN ADC1_MspInit 0 */
+  /* USER CODE BEGIN ADC2_MspInit 0 */
 
-  /* USER CODE END ADC1_MspInit 0 */
+  /* USER CODE END ADC2_MspInit 0 */
 
-  /** Initializes the peripherals clock
-  */
+  /** ADC时钟源配置 (PLL2 → 80MHz, ADC2 ASYNC_DIV1→80MHz)
+   *  原由ADC1分支配置, ADC1移除后迁入此处 */
     PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_ADC;
     PeriphClkInitStruct.PLL2.PLL2M = 32;
-    PeriphClkInitStruct.PLL2.PLL2N = 80;   /* PLL2P=80MHz, ADC2 ASYNC_DIV1→80MHz(规格内) */
+    PeriphClkInitStruct.PLL2.PLL2N = 80;
     PeriphClkInitStruct.PLL2.PLL2P = 2;
     PeriphClkInitStruct.PLL2.PLL2Q = 2;
     PeriphClkInitStruct.PLL2.PLL2R = 2;
@@ -162,27 +94,8 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef* adcHandle)
       Error_Handler();
     }
 
-    /* ADC1 clock enable */
+    /* ADC12共用时钟 (ADC1已移除, 但ADC2仍需使能) */
     __HAL_RCC_ADC12_CLK_ENABLE();
-
-    __HAL_RCC_GPIOA_CLK_ENABLE();
-    /**ADC1 GPIO Configuration
-    PA0     ------> ADC1_INP16 (Vrms)  (Vpp PA1已注释)
-    */
-    GPIO_InitStruct.Pin = GPIO_PIN_0;
-    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /* USER CODE BEGIN ADC1_MspInit 1 */
-
-  /* USER CODE END ADC1_MspInit 1 */
-  }
-  else if(adcHandle->Instance==ADC2)
-  {
-  /* USER CODE BEGIN ADC2_MspInit 0 */
-
-  /* USER CODE END ADC2_MspInit 0 */
 
   /** ADC2 GPIO Configuration: PA6 ------> ADC2_INP3 (fast channel)
   */
@@ -225,24 +138,7 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef* adcHandle)
 void HAL_ADC_MspDeInit(ADC_HandleTypeDef* adcHandle)
 {
 
-  if(adcHandle->Instance==ADC1)
-  {
-  /* USER CODE BEGIN ADC1_MspDeInit 0 */
-
-  /* USER CODE END ADC1_MspDeInit 0 */
-    /* Peripheral clock disable */
-    __HAL_RCC_ADC12_CLK_DISABLE();
-
-    /**ADC1 GPIO Configuration
-    PA0     ------> ADC1_INP16 (Vrms)  (Vpp PA1已注释)
-    */
-    HAL_GPIO_DeInit(GPIOA, GPIO_PIN_0);
-
-  /* USER CODE BEGIN ADC1_MspDeInit 1 */
-
-  /* USER CODE END ADC1_MspDeInit 1 */
-  }
-  else if(adcHandle->Instance==ADC2)
+  if(adcHandle->Instance==ADC2)
   {
   /* USER CODE BEGIN ADC2_MspDeInit 0 */
 
@@ -258,21 +154,6 @@ void HAL_ADC_MspDeInit(ADC_HandleTypeDef* adcHandle)
 }
 
 /* USER CODE BEGIN 1 */
-uint16_t adc_vrms = 0;  /* PA0/INP16 有效值检波, 16bit */
-float adc_vrms_volt = 0.0f;
-
-void ADC_Read_Channels(void)
-{
-  HAL_ADC_Start(&hadc1);
-  /* CH1: Vrms (PA0/INP16), 256x过采样 ≈ 0.4ms */
-  HAL_ADC_PollForConversion(&hadc1, 10);
-  adc_vrms = HAL_ADC_GetValue(&hadc1);
-  HAL_ADC_Stop(&hadc1);
-
-  /* 16bit过采样: raw范围0~65535, VREF=3.3V */
-  adc_vrms_volt = (float)adc_vrms * 3.3f / 65536.0f;
-}
-
 /* ===== ADC2 高速采样 (PA6/INP3, 4.03MHz, DMA) ===== */
 /* 缓冲区放AXI SRAM (DMA_BUF段), 避免D-Cache问题 */
 uint16_t adc2_buf[ADC2_BUF_SIZE] __attribute__((section("DMA_BUF")));

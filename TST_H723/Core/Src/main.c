@@ -118,7 +118,6 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
-  MX_ADC1_Init();
   MX_ADC2_Init();
   MX_TIM2_Init();
   MX_USART3_UART_Init();
@@ -153,9 +152,6 @@ int main(void)
       }
     }
 
-    /* ADC1双通道采样 (256x过采样, ≈0.8ms/次) */
-    ADC_Read_Channels();
-
     /* ADC2周期采样 (OLED验证 + HMI波形数据源, 每200ms一次) */
     {
       static uint32_t last_adc2 = 0;
@@ -166,10 +162,11 @@ int main(void)
       }
     }
 
-    /* ADC2缓冲区分析 (OLED验证: max/min/avg + 真有效值) */
+    /* ADC2缓冲区分析 (OLED验证: max/min/avg + 真有效值 + 触发同步) */
     static uint16_t adc2_max = 0, adc2_min = 4095, adc2_avg = 0;
     static float urms_mv = 0;  /* 软件真有效值(信号源端mV, 已还原增益) */
     static uint8_t adc2_analyzed = 0;
+    static uint32_t trig_pos = 0;  /* 上升过零触发点(波形示波器风格稳定显示) */
     if (adc2_done && !adc2_analyzed)
     {
       uint32_t sum = 0;
@@ -194,6 +191,17 @@ int main(void)
       }
       float rms_raw = sqrtf((float)sum_sq / ADC2_BUF_SIZE);
       urms_mv = rms_raw * 3300.0f / 4096.0f / FRONT_GAIN;
+
+      /* 上升过零触发点查找: 减去DC后, 在缓冲区中段(避开边界噪声)找第一个 s[i]<=0 && s[i+1]>0
+         用于波形示波器风格稳定显示, 避免每次刷新起点相位随机导致波形左右乱晃 */
+      int32_t mid = (int32_t)adc2_avg;
+      trig_pos = 0;
+      for (uint32_t i = ADC2_BUF_SIZE / 4; i < ADC2_BUF_SIZE * 3 / 4 - 1; i++)
+      {
+        int32_t s0 = (int32_t)adc2_buf[i] - mid;
+        int32_t s1 = (int32_t)adc2_buf[i + 1] - mid;
+        if (s0 <= 0 && s1 > 0) { trig_pos = i; break; }
+      }
       adc2_analyzed = 1;
     }
     else if (!adc2_done)
@@ -233,8 +241,9 @@ int main(void)
                 float pos = i * step;
                 uint32_t idx0 = (uint32_t)pos;
                 float frac = pos - idx0;
-                uint16_t v0 = adc2_buf[idx0 % ADC2_BUF_SIZE];
-                uint16_t v1 = adc2_buf[(idx0 + 1) % ADC2_BUF_SIZE];
+                /* 起点偏移trig_pos: 上升过零触发同步, 波形稳定显示 */
+                uint16_t v0 = adc2_buf[(trig_pos + idx0) % ADC2_BUF_SIZE];
+                uint16_t v1 = adc2_buf[(trig_pos + idx0 + 1) % ADC2_BUF_SIZE];
                 float v = v0 + (v1 - v0) * frac;
                 curve_data[PAGE1_PTS-1-i] = (uint8_t)((uint16_t)v >> 4);  /* 反转索引修复HMI镜像 */
               }
@@ -269,8 +278,9 @@ int main(void)
                 float pos = i * step;
                 uint32_t idx0 = (uint32_t)pos;
                 float frac = pos - idx0;
-                uint16_t v0 = adc2_buf[idx0 % ADC2_BUF_SIZE];
-                uint16_t v1 = adc2_buf[(idx0 + 1) % ADC2_BUF_SIZE];
+                /* 起点偏移trig_pos: 上升过零触发同步, 波形稳定显示 */
+                uint16_t v0 = adc2_buf[(trig_pos + idx0) % ADC2_BUF_SIZE];
+                uint16_t v1 = adc2_buf[(trig_pos + idx0 + 1) % ADC2_BUF_SIZE];
                 float v = v0 + (v1 - v0) * frac;
                 curve_data[PAGE2_PTS-1-i] = (uint8_t)((uint16_t)v >> 4);  /* 反转索引修复HMI镜像 */
               }
@@ -319,19 +329,16 @@ int main(void)
       }
     }
 
-    /* OLED显示: 软件/硬件Urms对比
-       L1: S:xxxx H:xxxx  (软件Urms / 硬件Urms, 信号源端mV)
+    /* OLED显示: 软件Urms + Vpp + 基频 (ADC1已移除, L1右半暂留空待填补偿规律)
+       L1: S:xxxx         (软件Urms mV, 信号源端)
        L2: P:xxxx         (Vpp mV, 已还原增益)
        L3: f:xxxx K:xxxx  (基频kHz / bin索引)
        L4: PGx RXxxx      (页面/RX计数)
     */
-    uint16_t hw_urms_mv = (uint16_t)(adc_vrms_volt * 1000.0f / FRONT_GAIN);
     uint16_t vpp_mv = (uint16_t)((float)(adc2_max - adc2_min) * 3300.0f / 4096.0f / FRONT_GAIN);
 
     OLED_ShowString(1,1,"S:");
     OLED_ShowNum(1,3,(uint16_t)urms_mv,4);
-    OLED_ShowString(1,8,"H:");
-    OLED_ShowNum(1,10,hw_urms_mv,4);
 
     OLED_ShowString(2,1,"P:");
     OLED_ShowNum(2,3,vpp_mv,4);
