@@ -102,21 +102,28 @@ uint32_t FFT_Process(const uint16_t *adc_data, uint8_t *spectrum, uint16_t spec_
     fft_cplx(fft_buf, FFT_N);
 
     /* 5. 计算前N/2点幅值 */
-    float max_mag = 0.0f;
-    uint32_t max_idx = 0;
     for (uint32_t k = 0; k < FFT_N_HALF; k++)
     {
-        float mag = sqrtf(fft_buf[k].re * fft_buf[k].re + fft_buf[k].im * fft_buf[k].im);
-        fft_mag[k] = mag;
-        /* 跳过bin0(直流), 从bin1开始找基频 */
-        if (k > 0 && mag > max_mag)
+        fft_mag[k] = sqrtf(fft_buf[k].re * fft_buf[k].re + fft_buf[k].im * fft_buf[k].im);
+    }
+
+    /* 6. 基频查找: 组合信号中频率最低的谱峰 (老师指导意见)
+       原逻辑: 找全局最大幅值峰 → 谐波幅值大于基频时会误判
+       新逻辑: 找第一个超过阈值的局部极大值(即频率最低的有效谱峰)
+       算法: 从bin2开始(跳过DC附近), 找 fft_mag[k]>阈值 且为局部极大值的第一个k */
+    uint32_t max_idx = 0;
+    for (uint32_t k = 2; k < FFT_N_HALF - 2; k++)
+    {
+        if (fft_mag[k] > FFT_MAG_THRESH &&
+            fft_mag[k] > fft_mag[k - 1] &&
+            fft_mag[k] > fft_mag[k + 1])
         {
-            max_mag = mag;
             max_idx = k;
+            break;  /* 找到第一个(频率最低)即停 */
         }
     }
 
-    /* 6. 降采样到spec_pts点, 归一化到0~250+噪声截断 (取区间最大值, 避免漏掉尖峰) */
+    /* 7. 降采样到spec_pts点, 归一化到0~250+噪声截断 (取区间最大值, 避免漏掉尖峰) */
     if (spectrum != NULL && spec_pts > 0)
     {
         uint32_t bin_per_pt = FFT_N_HALF / spec_pts;

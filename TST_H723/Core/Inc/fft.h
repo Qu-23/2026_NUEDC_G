@@ -24,6 +24,12 @@
 /* FFT幅值转mV: mag * 2/N * 2(汉宁窗补偿) * VREF/FULL * 1000 / FRONT_GAIN */
 #define FFT_MAG_TO_MV(mag)  ((mag) * 2.0f / (float)FFT_N * 2.0f * ADC_VREF / ADC_FULL * 1000.0f / FRONT_GAIN)
 
+/* 基频检测的V_peak阈值(mV), 与频谱噪声截断阈值一致
+   低于此值的局部极大值视为噪声, 不作为基频候选 */
+#define FFT_MAG_THRESH_MV  15.0f
+/* 反推FFT幅值阈值: mag = mv * N * FULL * GAIN / (2*2*VREF*1000) */
+#define FFT_MAG_THRESH     (FFT_MAG_THRESH_MV * (float)FFT_N * ADC_FULL * FRONT_GAIN / (2.0f * 2.0f * ADC_VREF * 1000.0f))
+
 /* 复数结构体 */
 typedef struct {
     float re;
