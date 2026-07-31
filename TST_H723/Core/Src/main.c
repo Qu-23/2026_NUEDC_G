@@ -28,6 +28,7 @@
 /* USER CODE BEGIN Includes */
 #include "OLED_EX.h"
 #include "fft.h"
+#include <math.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -37,7 +38,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define FRONT_GAIN  5.78f   /* 前级放大器总增益(线性性已验证) */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -165,8 +166,9 @@ int main(void)
       }
     }
 
-    /* ADC2缓冲区分析 (OLED验证: done/max/min/avg) */
+    /* ADC2缓冲区分析 (OLED验证: max/min/avg + 真有效值) */
     static uint16_t adc2_max = 0, adc2_min = 4095, adc2_avg = 0;
+    static float urms_mv = 0;  /* 软件真有效值(信号源端mV, 已还原增益) */
     static uint8_t adc2_analyzed = 0;
     if (adc2_done && !adc2_analyzed)
     {
@@ -182,6 +184,16 @@ int main(void)
       adc2_max = mx;
       adc2_min = mn;
       adc2_avg = sum / ADC2_BUF_SIZE;
+      /* 真有效值: Urms = sqrt((1/N)*Σ(xi-mean)²), 还原前级增益 */
+      /* 用uint64累加避免溢出(4095²×8192≈1.37e11 > uint32上限) */
+      uint64_t sum_sq = 0;
+      for (uint16_t i = 0; i < ADC2_BUF_SIZE; i++)
+      {
+        int32_t diff = (int32_t)adc2_buf[i] - (int32_t)adc2_avg;
+        sum_sq += (uint64_t)(diff * diff);
+      }
+      float rms_raw = sqrtf((float)sum_sq / ADC2_BUF_SIZE);
+      urms_mv = rms_raw * 3300.0f / 4096.0f / FRONT_GAIN;
       adc2_analyzed = 1;
     }
     else if (!adc2_done)
@@ -236,8 +248,8 @@ int main(void)
             HMI_tx_lock();
             HMI_curve_clear("s0.id", 0);
             HMI_curve_addt("s0.id", 0, curve_data, PAGE1_PTS);
-            HMI_send_val("Vrms", (int)(adc_vrms_volt * 1000));
-            HMI_send_val("Vpp", (int)((float)(adc2_max - adc2_min) * 3300.0f / 4096.0f));  /* ADC2波形峰峰值mV */
+            HMI_send_val("Vrms", (int)urms_mv);  /* 软件真有效值(信号源端mV) */
+            HMI_send_val("Vpp", (int)((float)(adc2_max - adc2_min) * 3300.0f / 4096.0f / FRONT_GAIN));  /* 信号源端峰峰值mV */
             HMI_send_val("f", (int)(fft_freq_hz / 1000.0f));  /* kHz */
             HMI_tx_unlock();
             break;
