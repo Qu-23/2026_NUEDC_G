@@ -135,8 +135,10 @@ uint32_t FFT_Process(const uint16_t *adc_data, uint8_t *spectrum, uint16_t spec_
                     max_in_range = fft_mag[k];
             }
 
-            /* 归一化到0~250(不顶格255), 噪声截断(<20置0), 翻转数组(HMI镜像) */
-            uint32_t val = (uint32_t)(max_in_range * 250.0f / max_mag);
+            /* 绝对高度: FFT幅值转mV直接对应像素高度 (50mV→50像素, 250mV→250像素)
+               还原前级增益, 噪声截断(<20置0), 翻转数组(HMI镜像) */
+            float amp_mv = FFT_MAG_TO_MV(max_in_range);
+            uint32_t val = (uint32_t)amp_mv;
             if (val > 250) val = 250;
             if (val < 20) val = 0;  /* 削去频域细小噪声 */
             spectrum[spec_pts - 1 - i] = (uint8_t)val;
@@ -168,5 +170,6 @@ float FFT_GetAmplitude(uint32_t k_fundamental, uint8_t harmonic)
         mag = fft_mag[k + 1];
 
     /* 幅值校正: *2/N(实信号FFT) * 2.0(汉宁窗能量补偿) * 3.3/4096(ADC电压) */
-    return mag * 2.0f / (float)FFT_N * 2.0f * 3.3f / 4096.0f;
+    /* 使用统一宏 FFT_MAG_TO_MV 转mV, 再除1000转V */
+    return FFT_MAG_TO_MV(mag) / 1000.0f;
 }

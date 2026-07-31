@@ -14,6 +14,16 @@
 /* 频率分辨率: fs/N = 491.67Hz */
 #define FFT_DF      (FFT_FS / (float)FFT_N)
 
+/* 前级放大器总增益(线性性已验证, 含模拟低通衰减) */
+#define FRONT_GAIN  5.78f
+
+/* ADC参考电压与满量程 */
+#define ADC_VREF    3.3f
+#define ADC_FULL    4096.0f
+
+/* FFT幅值转mV: mag * 2/N * 2(汉宁窗补偿) * VREF/FULL * 1000 / FRONT_GAIN */
+#define FFT_MAG_TO_MV(mag)  ((mag) * 2.0f / (float)FFT_N * 2.0f * ADC_VREF / ADC_FULL * 1000.0f / FRONT_GAIN)
+
 /* 复数结构体 */
 typedef struct {
     float re;

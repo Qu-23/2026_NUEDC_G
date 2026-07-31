@@ -38,7 +38,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define FRONT_GAIN  5.78f   /* 前级放大器总增益(线性性已验证) */
+/* FRONT_GAIN 已移至 fft.h, 供 fft.c 与 main.c 共用 */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
