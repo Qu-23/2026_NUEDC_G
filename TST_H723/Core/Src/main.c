@@ -188,12 +188,17 @@ int main(void)
       adc2_max = mx;
       adc2_min = mn;
       adc2_avg = sum / ADC2_BUF_SIZE;
-      /* 真有效值: Urms = sqrt((1/N)*Σ(xi-mean)²), 还原前级增益 */
-      /* 用uint64累加避免溢出(4095²×8192≈1.37e11 > uint32上限) */
+
+      /* Urms用原始adc2_buf计算 (真有效值)
+         不用filtered_buf: IFFT后加窗两端趋近DC会拉低RMS */
+      uint32_t dc_sum_raw = 0;
+      for (uint16_t i = 0; i < ADC2_BUF_SIZE; i++)
+        dc_sum_raw += adc2_buf[i];
+      uint32_t adc2_avg_raw = dc_sum_raw / ADC2_BUF_SIZE;
       uint64_t sum_sq = 0;
       for (uint16_t i = 0; i < ADC2_BUF_SIZE; i++)
       {
-        int32_t diff = (int32_t)filtered_buf[i] - (int32_t)adc2_avg;
+        int32_t diff = (int32_t)adc2_buf[i] - (int32_t)adc2_avg_raw;
         sum_sq += (uint64_t)(diff * diff);
       }
       float rms_raw = sqrtf((float)sum_sq / ADC2_BUF_SIZE);
