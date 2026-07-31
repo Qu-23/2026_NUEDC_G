@@ -135,12 +135,13 @@ uint32_t FFT_Process(const uint16_t *adc_data, uint8_t *spectrum, uint16_t spec_
                     max_in_range = fft_mag[k];
             }
 
-            /* 绝对高度: FFT幅值转mV直接对应像素高度 (50mV→50像素, 250mV→250像素)
-               还原前级增益, 噪声截断(<20置0), 翻转数组(HMI镜像) */
-            float amp_mv = FFT_MAG_TO_MV(max_in_range);
+            /* 绝对高度: FFT幅值转mV×2=Upp对应像素 (50mV Upp→50像素, 250mV Upp→250像素)
+               vb/v1/v2仍发V_peak(定量指标测幅值), 谱线按Upp画便于直接读源端峰峰值
+               还原前级增益, 噪声截断(V_peak<15mV置0), 翻转数组(HMI镜像) */
+            float amp_mv = FFT_MAG_TO_MV(max_in_range) * 2.0f;
             uint32_t val = (uint32_t)amp_mv;
             if (val > 250) val = 250;
-            if (val < 20) val = 0;  /* 削去频域细小噪声 */
+            if (val < 30) val = 0;  /* V_peak<15mV(即Upp<30mV)截断, 避免削掉小信号分量 */
             spectrum[spec_pts - 1 - i] = (uint8_t)val;
         }
     }
