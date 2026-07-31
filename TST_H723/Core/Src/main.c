@@ -192,14 +192,14 @@ int main(void)
       /* Urms用频域方法: 从滤波后fft_mag计算 (排除>0.78MHz噪声, 解决1MHz偏大问题) */
       urms_mv = FFT_GetRMSFiltered();
 
-      /* 上升过零触发点查找: 用原始adc2_buf (不加窗, 无末端衰减问题)
+      /* 上升过零触发点查找: 用filtered_buf (补偿窗衰减后, 滤波后波形更干净)
          IFFT不改变DC, adc2_avg(filtered_buf均值)≈原始DC */
       int32_t mid = (int32_t)adc2_avg;
       trig_pos = 0;
       for (uint32_t i = ADC2_BUF_SIZE / 4; i < ADC2_BUF_SIZE * 3 / 4 - 1; i++)
       {
-        int32_t s0 = (int32_t)adc2_buf[i] - mid;
-        int32_t s1 = (int32_t)adc2_buf[i + 1] - mid;
+        int32_t s0 = (int32_t)filtered_buf[i] - mid;
+        int32_t s1 = (int32_t)filtered_buf[i + 1] - mid;
         if (s0 <= 0 && s1 > 0) { trig_pos = i; break; }
       }
       adc2_analyzed = 1;
@@ -233,9 +233,9 @@ int main(void)
                 uint32_t idx0 = (uint32_t)pos;
                 float frac = pos - idx0;
                 /* 起点偏移trig_pos: 上升过零触发同步, 波形稳定显示
-                   用原始adc2_buf (不加窗, 无末端衰减) */
-                uint16_t v0 = adc2_buf[(trig_pos + idx0) % ADC2_BUF_SIZE];
-                uint16_t v1 = adc2_buf[(trig_pos + idx0 + 1) % ADC2_BUF_SIZE];
+                   用filtered_buf (滤波后波形, 已补偿窗衰减) */
+                uint16_t v0 = filtered_buf[(trig_pos + idx0) % ADC2_BUF_SIZE];
+                uint16_t v1 = filtered_buf[(trig_pos + idx0 + 1) % ADC2_BUF_SIZE];
                 float v = v0 + (v1 - v0) * frac;
                 curve_data[PAGE1_PTS-1-i] = (uint8_t)((uint16_t)v >> 4);  /* 反转索引修复HMI镜像 */
               }
@@ -244,14 +244,15 @@ int main(void)
             {
               /* 频率无效时降级: 直接降采样 */
               for (uint16_t i = 0; i < PAGE1_PTS; i++)
-                curve_data[PAGE1_PTS-1-i] = adc2_buf[i * 16] >> 4;
+                curve_data[PAGE1_PTS-1-i] = filtered_buf[i * 16] >> 4;
             }
             HMI_tx_lock();
-            HMI_curve_clear("s0.id", 0);
-            HMI_curve_addt("s0.id", 0, curve_data, PAGE1_PTS);
+            /* 数值命令在addt前发送: 避免干扰HMI屏曲线数据处理导致末端0 */
             HMI_send_val("Vrms", (int)urms_mv);  /* 软件真有效值(信号源端mV) */
             HMI_send_val("Vpp", (int)((float)(adc2_max - adc2_min) * 3300.0f / 4096.0f / FRONT_GAIN));  /* 信号源端峰峰值mV */
             HMI_send_val("f", (int)(fft_freq_hz / 1000.0f));  /* kHz */
+            HMI_curve_clear("s0.id", 0);
+            HMI_curve_addt("s0.id", 0, curve_data, PAGE1_PTS);
             HMI_tx_unlock();
             break;
           }
@@ -271,9 +272,9 @@ int main(void)
                 uint32_t idx0 = (uint32_t)pos;
                 float frac = pos - idx0;
                 /* 起点偏移trig_pos: 上升过零触发同步, 波形稳定显示
-                   用原始adc2_buf (不加窗, 无末端衰减) */
-                uint16_t v0 = adc2_buf[(trig_pos + idx0) % ADC2_BUF_SIZE];
-                uint16_t v1 = adc2_buf[(trig_pos + idx0 + 1) % ADC2_BUF_SIZE];
+                   用filtered_buf (滤波后波形, 已补偿窗衰减) */
+                uint16_t v0 = filtered_buf[(trig_pos + idx0) % ADC2_BUF_SIZE];
+                uint16_t v1 = filtered_buf[(trig_pos + idx0 + 1) % ADC2_BUF_SIZE];
                 float v = v0 + (v1 - v0) * frac;
                 curve_data[PAGE2_PTS-1-i] = (uint8_t)((uint16_t)v >> 4);  /* 反转索引修复HMI镜像 */
               }
@@ -282,7 +283,7 @@ int main(void)
             {
               /* 频率无效时降级: 直接降采样 */
               for (uint16_t i = 0; i < PAGE2_PTS; i++)
-                curve_data[PAGE2_PTS-1-i] = adc2_buf[i * 8] >> 4;
+                curve_data[PAGE2_PTS-1-i] = filtered_buf[i * 8] >> 4;
             }
             HMI_tx_lock();
             HMI_curve_clear("s0.id", 0);

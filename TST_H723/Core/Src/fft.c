@@ -189,15 +189,18 @@ uint32_t FFT_Process(const uint16_t *adc_data, uint8_t *spectrum, uint16_t spec_
         }
     }
 
-    /* 8. IFFT回时域, 输出滤波后波形 (用于Vpp/Urms/时域显示)
+    /* 8. IFFT回时域, 输出滤波后波形 (用于Vpp/时域显示)
        IFFT后fft_buf[i].re是 (x[n]-dc)*w[n] 的滤波后版本
-       加回dc: 中间区域(w≈1)≈x[n]滤波后值; 两端(w≈0)趋近dc电平 */
+       补偿汉宁窗衰减: 除以w[n]恢复原始幅度, 两端w≈0限制最小0.05避免放大噪声 */
     if (filtered != NULL)
     {
         ifft_cplx(fft_buf, FFT_N);
+        /* 补偿汉宁窗衰减: 除以窗值恢复原始幅度, 限制最小值避免放大噪声 */
         for (uint32_t i = 0; i < FFT_N; i++)
         {
-            float val = fft_buf[i].re + dc;
+            float w = 0.5f - 0.5f * cosf(2.0f * 3.14159265f * (float)i / (float)FFT_N);
+            if (w < 0.05f) w = 0.05f;
+            float val = fft_buf[i].re / w + dc;
             if (val < 0.0f) val = 0.0f;
             if (val > 4095.0f) val = 4095.0f;
             filtered[i] = (uint16_t)val;
