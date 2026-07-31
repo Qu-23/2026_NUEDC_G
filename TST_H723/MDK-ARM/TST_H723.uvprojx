@@ -750,6 +750,16 @@
           </Files>
         </Group>
         <Group>
+          <GroupName>FFT</GroupName>
+          <Files>
+            <File>
+              <FileName>fft.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\fft.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
           <GroupName>::CMSIS</GroupName>
         </Group>
       </Groups>

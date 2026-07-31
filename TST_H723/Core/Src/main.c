@@ -237,6 +237,7 @@ int main(void)
             HMI_curve_clear("s0.id", 0);
             HMI_curve_addt("s0.id", 0, curve_data, PAGE1_PTS);
             HMI_send_val("Vrms", (int)(adc_vrms_volt * 1000));
+            HMI_send_val("Vpp", (int)((float)(adc2_max - adc2_min) * 3300.0f / 4096.0f));  /* ADC2波形峰峰值mV */
             HMI_send_val("f", (int)(fft_freq_hz / 1000.0f));  /* kHz */
             HMI_tx_unlock();
             break;

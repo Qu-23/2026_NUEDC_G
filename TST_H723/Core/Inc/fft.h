@@ -7,11 +7,11 @@
 #define FFT_N       8192U
 #define FFT_N_HALF  (FFT_N / 2U)
 
-/* 采样率: TIM2触发270MHz/67=4.03MHz, 但ADC转换时间280ns>触发周期248ns,
-   导致隔触发采样, 实际采样率减半 = 2.015MHz */
-#define FFT_FS      2015000.0f
+/* 采样率: TIM2触发270MHz/67=4.02985MHz, ADC时钟80MHz下转换时间175ns<触发周期248ns,
+   隔触发已解除, 实际采样率 = 触发频率 = 4.02985MHz */
+#define FFT_FS      4029850.0f
 
-/* 频率分辨率: fs/N = 245.97Hz */
+/* 频率分辨率: fs/N = 491.67Hz */
 #define FFT_DF      (FFT_FS / (float)FFT_N)
 
 /* 复数结构体 */
