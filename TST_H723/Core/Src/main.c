@@ -317,28 +317,27 @@ int main(void)
       }
     }
 
-    /* 电压转换: 16bit raw → mV (Vpp通道已注释, 后续手动计算峰峰值) */
-    uint16_t vrms_mv = (uint16_t)(adc_vrms_volt * 1000.0f);
-
-    /* OLED显示:
-       L1: R:xxxx        (Vrms mV, Vpp待后续手动计算)
-       L2: H:xxxx L:xxxx  (ADC2 max + min 0-4095)
-       L3: txx Kyyy        (ADC2采样耗时ms + 基频bin, 诊断隔触发采样)
+    /* OLED显示: 软件/硬件Urms对比
+       L1: S:xxxx H:xxxx  (软件Urms / 硬件Urms, 信号源端mV)
+       L2: P:xxxx         (Vpp mV, 已还原增益)
+       L3: f:xxxx K:xxxx  (基频kHz / bin索引)
        L4: PGx RXxxx      (页面/RX计数)
     */
-    OLED_ShowString(1,1,"R:");
-    OLED_ShowNum(1,3,vrms_mv,4);
+    uint16_t hw_urms_mv = (uint16_t)(adc_vrms_volt * 1000.0f / FRONT_GAIN);
+    uint16_t vpp_mv = (uint16_t)((float)(adc2_max - adc2_min) * 3300.0f / 4096.0f / FRONT_GAIN);
 
-    OLED_ShowString(2,1,"H:");
-    OLED_ShowNum(2,3,adc2_max,4);
-    OLED_ShowString(2,7," L:");
-    OLED_ShowNum(2,10,adc2_min,4);
+    OLED_ShowString(1,1,"S:");
+    OLED_ShowNum(1,3,(uint16_t)urms_mv,4);
+    OLED_ShowString(1,8,"H:");
+    OLED_ShowNum(1,10,hw_urms_mv,4);
 
-    /* L3: O=OVR计数(诊断隔触发) K=基频bin */
-    OLED_ShowString(3,1,"O");
-    OLED_ShowNum(3,2,ovr_cnt,3);
-    OLED_ShowString(3,6,"K");
-    OLED_ShowNum(3,7,fft_k_peak,4);
+    OLED_ShowString(2,1,"P:");
+    OLED_ShowNum(2,3,vpp_mv,4);
+
+    OLED_ShowString(3,1,"f:");
+    OLED_ShowNum(3,3,(uint16_t)(fft_freq_hz/1000.0f),4);
+    OLED_ShowString(3,8,"K:");
+    OLED_ShowNum(3,10,fft_k_peak,4);
 
     OLED_ShowString(4,1,"PG");
     OLED_ShowNum(4,3,current_page,1);
