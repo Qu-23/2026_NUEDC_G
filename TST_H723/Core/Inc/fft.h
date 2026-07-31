@@ -61,4 +61,11 @@ float FFT_GetFrequency(uint32_t k_peak);
  */
 float FFT_GetAmplitude(uint32_t k_fundamental, uint8_t harmonic);
 
+/**
+ * @brief  从滤波后FFT频域计算真有效值 (排除>截止频率的噪声)
+ *         Parseval定理: V_rms = sqrt(2×Σ|fft_mag[k]|²) / N × 汉宁窗功率补偿
+ * @retval 真有效值 (mV, 信号源端)
+ */
+float FFT_GetRMSFiltered(void);
+
 #endif /* __FFT_H__ */

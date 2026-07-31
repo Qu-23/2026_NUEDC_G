@@ -189,29 +189,17 @@ int main(void)
       adc2_min = mn;
       adc2_avg = sum / ADC2_BUF_SIZE;
 
-      /* Urms用原始adc2_buf计算 (真有效值)
-         不用filtered_buf: IFFT后加窗两端趋近DC会拉低RMS */
-      uint32_t dc_sum_raw = 0;
-      for (uint16_t i = 0; i < ADC2_BUF_SIZE; i++)
-        dc_sum_raw += adc2_buf[i];
-      uint32_t adc2_avg_raw = dc_sum_raw / ADC2_BUF_SIZE;
-      uint64_t sum_sq = 0;
-      for (uint16_t i = 0; i < ADC2_BUF_SIZE; i++)
-      {
-        int32_t diff = (int32_t)adc2_buf[i] - (int32_t)adc2_avg_raw;
-        sum_sq += (uint64_t)(diff * diff);
-      }
-      float rms_raw = sqrtf((float)sum_sq / ADC2_BUF_SIZE);
-      urms_mv = rms_raw * 3300.0f / 4096.0f / FRONT_GAIN;
+      /* Urms用频域方法: 从滤波后fft_mag计算 (排除>0.78MHz噪声, 解决1MHz偏大问题) */
+      urms_mv = FFT_GetRMSFiltered();
 
-      /* 上升过零触发点查找: 减去DC后, 在缓冲区中段(避开边界噪声)找第一个 s[i]<=0 && s[i+1]>0
-         用于波形示波器风格稳定显示, 避免每次刷新起点相位随机导致波形左右乱晃 */
+      /* 上升过零触发点查找: 用原始adc2_buf (不加窗, 无末端衰减问题)
+         IFFT不改变DC, adc2_avg(filtered_buf均值)≈原始DC */
       int32_t mid = (int32_t)adc2_avg;
       trig_pos = 0;
       for (uint32_t i = ADC2_BUF_SIZE / 4; i < ADC2_BUF_SIZE * 3 / 4 - 1; i++)
       {
-        int32_t s0 = (int32_t)filtered_buf[i] - mid;
-        int32_t s1 = (int32_t)filtered_buf[i + 1] - mid;
+        int32_t s0 = (int32_t)adc2_buf[i] - mid;
+        int32_t s1 = (int32_t)adc2_buf[i + 1] - mid;
         if (s0 <= 0 && s1 > 0) { trig_pos = i; break; }
       }
       adc2_analyzed = 1;
@@ -244,9 +232,10 @@ int main(void)
                 float pos = i * step;
                 uint32_t idx0 = (uint32_t)pos;
                 float frac = pos - idx0;
-                /* 起点偏移trig_pos: 上升过零触发同步, 波形稳定显示 */
-                uint16_t v0 = filtered_buf[(trig_pos + idx0) % ADC2_BUF_SIZE];
-                uint16_t v1 = filtered_buf[(trig_pos + idx0 + 1) % ADC2_BUF_SIZE];
+                /* 起点偏移trig_pos: 上升过零触发同步, 波形稳定显示
+                   用原始adc2_buf (不加窗, 无末端衰减) */
+                uint16_t v0 = adc2_buf[(trig_pos + idx0) % ADC2_BUF_SIZE];
+                uint16_t v1 = adc2_buf[(trig_pos + idx0 + 1) % ADC2_BUF_SIZE];
                 float v = v0 + (v1 - v0) * frac;
                 curve_data[PAGE1_PTS-1-i] = (uint8_t)((uint16_t)v >> 4);  /* 反转索引修复HMI镜像 */
               }
@@ -255,7 +244,7 @@ int main(void)
             {
               /* 频率无效时降级: 直接降采样 */
               for (uint16_t i = 0; i < PAGE1_PTS; i++)
-                curve_data[PAGE1_PTS-1-i] = filtered_buf[i * 16] >> 4;
+                curve_data[PAGE1_PTS-1-i] = adc2_buf[i * 16] >> 4;
             }
             HMI_tx_lock();
             HMI_curve_clear("s0.id", 0);
@@ -281,9 +270,10 @@ int main(void)
                 float pos = i * step;
                 uint32_t idx0 = (uint32_t)pos;
                 float frac = pos - idx0;
-                /* 起点偏移trig_pos: 上升过零触发同步, 波形稳定显示 */
-                uint16_t v0 = filtered_buf[(trig_pos + idx0) % ADC2_BUF_SIZE];
-                uint16_t v1 = filtered_buf[(trig_pos + idx0 + 1) % ADC2_BUF_SIZE];
+                /* 起点偏移trig_pos: 上升过零触发同步, 波形稳定显示
+                   用原始adc2_buf (不加窗, 无末端衰减) */
+                uint16_t v0 = adc2_buf[(trig_pos + idx0) % ADC2_BUF_SIZE];
+                uint16_t v1 = adc2_buf[(trig_pos + idx0 + 1) % ADC2_BUF_SIZE];
                 float v = v0 + (v1 - v0) * frac;
                 curve_data[PAGE2_PTS-1-i] = (uint8_t)((uint16_t)v >> 4);  /* 反转索引修复HMI镜像 */
               }
@@ -292,7 +282,7 @@ int main(void)
             {
               /* 频率无效时降级: 直接降采样 */
               for (uint16_t i = 0; i < PAGE2_PTS; i++)
-                curve_data[PAGE2_PTS-1-i] = filtered_buf[i * 8] >> 4;
+                curve_data[PAGE2_PTS-1-i] = adc2_buf[i * 8] >> 4;
             }
             HMI_tx_lock();
             HMI_curve_clear("s0.id", 0);

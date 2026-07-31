@@ -232,3 +232,18 @@ float FFT_GetAmplitude(uint32_t k_fundamental, uint8_t harmonic)
     /* 使用统一宏 FFT_MAG_TO_MV 转mV, 再除1000转V */
     return FFT_MAG_TO_MV(mag) / 1000.0f;
 }
+
+float FFT_GetRMSFiltered(void)
+{
+    /* 频域真有效值: 从滤波后fft_mag计算 (自动排除>截止频率的噪声)
+       Parseval: Σ|x_w[n]|² = (1/N)×Σ|X[k]|²
+       实信号共轭对称: Σ|X[k]|² ≈ 2×Σ|fft_mag[k]|² (k=1..N/2-1)
+       加窗RMS = sqrt(2×Σ|fft_mag[k]|²) / N
+       汉宁窗功率增益=3/8, 补偿: ×sqrt(8/3)=1.633 */
+    float energy = 0.0f;
+    for (uint32_t k = 1; k < FFT_N_HALF; k++)
+        energy += fft_mag[k] * fft_mag[k];
+    float rms = sqrtf(energy * 2.0f) / (float)FFT_N;
+    rms *= 1.633f;  /* 汉宁窗功率补偿 sqrt(8/3) */
+    return rms * ADC_VREF / ADC_FULL * 1000.0f / FRONT_GAIN;  /* mV */
+}
