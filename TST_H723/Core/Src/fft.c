@@ -118,11 +118,11 @@ uint32_t FFT_Process(const uint16_t *adc_data, uint8_t *spectrum, uint16_t spec_
     /* 4. 执行FFT */
     fft_cplx(fft_buf, FFT_N);
 
-    /* 4.5 软件滤波: brick-wall 截止 0.9MHz (>0.9MHz 分量直接置零)
-       信号最高500kHz, 截止0.9MHz留400kHz余量确保1MHz噪声完全滤除
+    /* 4.5 软件滤波: brick-wall 截止 0.78MHz (>0.78MHz 分量直接置零)
+       信号最高500kHz, 截止0.78MHz留280kHz余量确保高频噪声完全滤除
        实信号FFT共轭对称: fft_buf[N-k] = conj(fft_buf[k]), 需同时处理 */
     {
-        uint32_t k_cut = (uint32_t)(900000.0f / FFT_DF);  /* 0.9MHz 对应 bin ≈ 1830 */
+        uint32_t k_cut = (uint32_t)(780000.0f / FFT_DF);  /* 0.78MHz 对应 bin ≈ 1586 */
         if (k_cut > FFT_N_HALF) k_cut = FFT_N_HALF;
         for (uint32_t k = k_cut; k < FFT_N_HALF; k++)
         {

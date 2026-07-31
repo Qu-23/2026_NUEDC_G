@@ -221,10 +221,10 @@ int main(void)
       adc2_analyzed = 0;
     }
 
-    /* HMI数据刷新 (循环计数器, 约0.4秒周期, 题目要求2s内留余量) */
+    /* HMI数据刷新 (循环计数器, 约0.3秒周期, 题目要求2s内留余量) */
     {
       static uint8_t hmi_div = 0;
-      if (++hmi_div >= 4)  /* 约0.4秒(4次循环×~100ms), 2s内可完成5次刷新, 视觉接近连续 */
+      if (++hmi_div >= 3)  /* 约0.3秒(3次循环×~100ms), 提升PG响应灵敏度 */
       {
         hmi_div = 0;
 
@@ -305,9 +305,14 @@ int main(void)
             /* curve_data已被FFT_Process填充为频谱数据(600点) */
             /* 调试: 直接发送谱线绝对高度对应的幅值(mV), 与谱线像素高度数值一致
                FFT_GetAmplitude返回V, ×1000还原为mV (与FFT_MAG_TO_MV同一口径) */
-            uint16_t vb_mv = (uint16_t)(FFT_GetAmplitude(fft_k_peak, 1) * 1000.0f + 4.0f);  /* +4mV补偿(实测稳定偏小) */
-            uint16_t v1_mv = (uint16_t)(FFT_GetAmplitude(fft_k_peak, 2) * 1000.0f + 4.0f);
-            uint16_t v2_mv = (uint16_t)(FFT_GetAmplitude(fft_k_peak, 3) * 1000.0f + 4.0f);
+            /* +4mV补偿仅在分量存在时应用(避免0+4=4产生假谱线) */
+            float amp_f;
+            amp_f = FFT_GetAmplitude(fft_k_peak, 1) * 1000.0f;
+            uint16_t vb_mv = (amp_f > 1.0f) ? (uint16_t)(amp_f + 4.0f) : 0;
+            amp_f = FFT_GetAmplitude(fft_k_peak, 2) * 1000.0f;
+            uint16_t v1_mv = (amp_f > 1.0f) ? (uint16_t)(amp_f + 4.0f) : 0;
+            amp_f = FFT_GetAmplitude(fft_k_peak, 3) * 1000.0f;
+            uint16_t v2_mv = (amp_f > 1.0f) ? (uint16_t)(amp_f + 4.0f) : 0;
             HMI_tx_lock();
             HMI_curve_clear("s0.id", 0);
             HMI_curve_addt("s0.id", 0, curve_data, PAGE3_PTS);
