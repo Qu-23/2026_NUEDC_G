@@ -118,28 +118,22 @@ uint32_t FFT_Process(const uint16_t *adc_data, uint8_t *spectrum, uint16_t spec_
     /* 4. 执行FFT */
     fft_cplx(fft_buf, FFT_N);
 
-    /* 4.5 软件滤波: 软过渡衰减 0.9MHz~1.1MHz 分量 (Gibbs振铃缓解)
-       实信号FFT共轭对称: fft_buf[N-k] = conj(fft_buf[k]), 需同时处理 */
+    /* 4.5 软件滤波: brick-wall 截止 1MHz (>1MHz 分量直接置零)
+       实信号FFT共轭对称: fft_buf[N-k] = conj(fft_buf[k]), 需同时处理
+       注: brick-wall可能引入Gibbs振铃(时域过冲~9%), 若波形过冲严重可改回短软过渡 */
     {
-        uint32_t k_cut = (uint32_t)(900000.0f / FFT_DF);   /* 0.9MHz 开始衰减 */
-        uint32_t k_stop = (uint32_t)(1100000.0f / FFT_DF); /* 1.1MHz 完全截止 */
-        if (k_stop > FFT_N_HALF) k_stop = FFT_N_HALF;
-        if (k_cut >= k_stop) k_cut = k_stop > 0 ? k_stop - 1 : 0;
+        uint32_t k_cut = (uint32_t)(1000000.0f / FFT_DF);  /* 1MHz 对应 bin ≈ 2034 */
+        if (k_cut > FFT_N_HALF) k_cut = FFT_N_HALF;
         for (uint32_t k = k_cut; k < FFT_N_HALF; k++)
         {
-            float gain;
-            if (k < k_stop)
-                gain = 1.0f - (float)(k - k_cut) / (float)(k_stop - k_cut);
-            else
-                gain = 0.0f;
-            fft_buf[k].re *= gain;
-            fft_buf[k].im *= gain;
+            fft_buf[k].re = 0.0f;
+            fft_buf[k].im = 0.0f;
             /* 共轭对称: N-k 分量 */
             uint32_t k_sym = FFT_N - k;
             if (k_sym != k)
             {
-                fft_buf[k_sym].re *= gain;
-                fft_buf[k_sym].im *= gain;
+                fft_buf[k_sym].re = 0.0f;
+                fft_buf[k_sym].im = 0.0f;
             }
         }
     }
