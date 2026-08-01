@@ -29,6 +29,7 @@
 #include "OLED_EX.h"
 #include "fft.h"
 #include <math.h>
+#include <string.h>  /* memset (直方图去极值用) */
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -59,8 +60,10 @@ uint8_t wave_mode = 0;  /* 0=1T(默认), 1=3T, HMI发送't'切换 */
 #define PAGE2_PTS      1024     /* 页面2横向像素 */
 #define PAGE3_PTS      720      /* 页面3横向像素(频谱) */
 
-/* addt透传数据缓冲(最大PAGE2_PTS=1024点) */
-static uint8_t curve_data[PAGE2_PTS];
+/* addt透传数据缓冲: curve_data用于频谱(page3), wave_data用于波形(page1/2)
+   分开避免FFT_Process(频谱)和case1/2(波形)交替执行时互相覆盖 */
+static uint8_t curve_data[PAGE2_PTS];   /* 频谱数据(FFT_Process输出) */
+static uint8_t wave_data[PAGE2_PTS];    /* 波形数据(case1/2输出) */
 
 /* 滤波后时域数据(FFT+IFFT输出, 放DMA_BUF段避免D-Cache问题) */
 uint16_t filtered_buf[ADC2_BUF_SIZE] __attribute__((section("DMA_BUF")));
@@ -80,7 +83,31 @@ static void MPU_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+/* 纵向自适应缩放: 以DC为中点, 按信号range映射到0~255 (8位HMI曲线满屏显示)
+   range<100时钳到100, 避免小信号时噪声被过度放大 */
+static uint8_t wave_scale(uint16_t v, uint16_t dc, uint16_t range)
+{
+  if (range < 100) range = 100;
+  int32_t centered = (int32_t)v - (int32_t)dc;
+  int32_t scaled = centered * 256 / ((int32_t)range + 1) + 128;
+  if (scaled < 0) scaled = 0;
+  if (scaled > 255) scaled = 255;
+  return (uint8_t)scaled;
+}
 
+/* Catmull-Rom三次插值: 4点拟合平滑曲线, 改善高频时采样点少的折线感
+   比线性插值更平滑, 适合正弦/谐波组合信号 */
+static float catmull_rom(const uint16_t *buf, uint32_t size, float pos)
+{
+  uint32_t idx0 = (uint32_t)pos % size;
+  float frac = pos - (float)(uint32_t)pos;
+  float vp = buf[(idx0 + size - 1) % size];
+  float v0 = buf[idx0];
+  float v1 = buf[(idx0 + 1) % size];
+  float vn = buf[(idx0 + 2) % size];
+  float t = frac, t2 = t * t, t3 = t2 * t;
+  return 0.5f * ((2.0f*v0) + (-vp+v1)*t + (2.0f*vp-5.0f*v0+4.0f*v1-vn)*t2 + (-vp+3.0f*v0-3.0f*v1+vn)*t3);
+}
 /* USER CODE END 0 */
 
 /**
@@ -169,7 +196,8 @@ int main(void)
     static uint16_t adc2_max = 0, adc2_min = 4095, adc2_avg = 0;
     static float urms_mv = 0;  /* 软件真有效值(信号源端mV, 已还原增益) */
     static uint8_t adc2_analyzed = 0;
-    static uint32_t trig_pos = 0;  /* 上升过零触发点(波形示波器风格稳定显示) */
+    /* 默认中点: 避免找不到过零点时回退到0(filtered_buf[0]是汉宁窗边界混乱值) */
+    static uint32_t trig_pos = ADC2_BUF_SIZE / 2;  /* 上升过零触发点(波形示波器风格稳定显示) */
     if (adc2_done && !adc2_analyzed)
     {
       /* FFT+软件滤波: 输出滤波后时域数据(filtered_buf) + 频谱(curve_data) + 基频 */
@@ -177,25 +205,38 @@ int main(void)
       fft_freq_hz = FFT_GetFrequency(fft_k_peak);
 
       uint32_t sum = 0;
-      uint16_t mx = 0, mn = 4095;
+      static uint16_t hist[4096];
+      memset(hist, 0, sizeof(hist));
       for (uint16_t i = 0; i < ADC2_BUF_SIZE; i++)
       {
         uint16_t v = filtered_buf[i];
-        if (v > mx) mx = v;
-        if (v < mn) mn = v;
         sum += v;
+        hist[v]++;
       }
-      adc2_max = mx;
-      adc2_min = mn;
       adc2_avg = sum / ADC2_BUF_SIZE;
+
+      /* 直方图去极值: 跳过top/bottom 2%极端点, 抑制brick-wall滤波ringing尖峰导致Vpp偏大 */
+      uint32_t skip = ADC2_BUF_SIZE / 50;
+      uint32_t cnt = 0;
+      for (int32_t v = 4095; v >= 0; v--)
+      {
+        cnt += hist[v];
+        if (cnt > skip) { adc2_max = (uint16_t)v; break; }
+      }
+      cnt = 0;
+      for (int32_t v = 0; v < 4096; v++)
+      {
+        cnt += hist[v];
+        if (cnt > skip) { adc2_min = (uint16_t)v; break; }
+      }
 
       /* Urms用频域方法: 从滤波后fft_mag计算 (排除>0.78MHz噪声, 解决1MHz偏大问题) */
       urms_mv = FFT_GetRMSFiltered();
 
       /* 上升过零触发点查找: 用filtered_buf (补偿窗衰减后, 滤波后波形更干净)
-         IFFT不改变DC, adc2_avg(filtered_buf均值)≈原始DC */
+         IFFT不改变DC, adc2_avg(filtered_buf均值)≈原始DC
+         找不到过零点时保持上一次的trig_pos, 避免跳变到0导致波形混乱 */
       int32_t mid = (int32_t)adc2_avg;
-      trig_pos = 0;
       for (uint32_t i = ADC2_BUF_SIZE / 4; i < ADC2_BUF_SIZE * 3 / 4 - 1; i++)
       {
         int32_t s0 = (int32_t)filtered_buf[i] - mid;
@@ -229,30 +270,29 @@ int main(void)
               float step = points_per_cycle * cycles / PAGE1_PTS;
               for (uint16_t i = 0; i < PAGE1_PTS; i++)
               {
-                float pos = i * step;
-                uint32_t idx0 = (uint32_t)pos;
-                float frac = pos - idx0;
-                /* 起点偏移trig_pos: 上升过零触发同步, 波形稳定显示
-                   用filtered_buf (滤波后波形, 已补偿窗衰减) */
-                uint16_t v0 = filtered_buf[(trig_pos + idx0) % ADC2_BUF_SIZE];
-                uint16_t v1 = filtered_buf[(trig_pos + idx0 + 1) % ADC2_BUF_SIZE];
-                float v = v0 + (v1 - v0) * frac;
-                curve_data[PAGE1_PTS-1-i] = (uint8_t)((uint16_t)v >> 4);  /* 反转索引修复HMI镜像 */
+                /* Catmull-Rom三次插值: 比线性插值更平滑, 改善高频折线感 */
+                float v = catmull_rom(filtered_buf, ADC2_BUF_SIZE, (float)trig_pos + i * step);
+                wave_data[PAGE1_PTS-1-i] = wave_scale((uint16_t)v, adc2_avg, adc2_max - adc2_min);  /* 反转索引修复HMI镜像 */
               }
             }
             else
             {
               /* 频率无效时降级: 直接降采样 */
               for (uint16_t i = 0; i < PAGE1_PTS; i++)
-                curve_data[PAGE1_PTS-1-i] = filtered_buf[i * 16] >> 4;
+                wave_data[PAGE1_PTS-1-i] = wave_scale(filtered_buf[i * 16], adc2_avg, adc2_max - adc2_min);
             }
             HMI_tx_lock();
-            /* 数值命令在addt前发送: 避免干扰HMI屏曲线数据处理导致末端0 */
-            HMI_send_val("Vrms", (int)urms_mv);  /* 软件真有效值(信号源端mV) */
-            HMI_send_val("Vpp", (int)((float)(adc2_max - adc2_min) * 3300.0f / 4096.0f / FRONT_GAIN));  /* 信号源端峰峰值mV */
-            HMI_send_val("f", (int)(fft_freq_hz / 1000.0f));  /* kHz */
             HMI_curve_clear("s0.id", 0);
-            HMI_curve_addt("s0.id", 0, curve_data, PAGE1_PTS);
+            /* 数值命令在addt后发送: 避免前序命令延迟导致addt的0xFE就绪超时(混乱波形根因)
+               仅在透传成功(0xFD收到)时发送, 避免0xFD超时时数值命令被当作透传数据导致末端0 */
+            uint8_t addt_ok = HMI_curve_addt("s0.id", 0, wave_data, PAGE1_PTS);
+            if (addt_ok)
+            {
+              HAL_Delay(5);  /* 等待HMI屏退出透传模式恢复命令解析, 避免首个数值命令被丢弃 */
+              HMI_send_val("Vrms", (int)urms_mv);  /* 软件真有效值(信号源端mV) */
+              HMI_send_val("Vpp", (int)((float)(adc2_max - adc2_min) * 3300.0f / 4096.0f / FRONT_GAIN));  /* 信号源端峰峰值mV */
+              HMI_send_val("f", (int)(fft_freq_hz / 1000.0f));  /* kHz */
+            }
             HMI_tx_unlock();
             break;
           }
@@ -268,26 +308,20 @@ int main(void)
               float step = points_per_cycle * cycles / PAGE2_PTS;
               for (uint16_t i = 0; i < PAGE2_PTS; i++)
               {
-                float pos = i * step;
-                uint32_t idx0 = (uint32_t)pos;
-                float frac = pos - idx0;
-                /* 起点偏移trig_pos: 上升过零触发同步, 波形稳定显示
-                   用filtered_buf (滤波后波形, 已补偿窗衰减) */
-                uint16_t v0 = filtered_buf[(trig_pos + idx0) % ADC2_BUF_SIZE];
-                uint16_t v1 = filtered_buf[(trig_pos + idx0 + 1) % ADC2_BUF_SIZE];
-                float v = v0 + (v1 - v0) * frac;
-                curve_data[PAGE2_PTS-1-i] = (uint8_t)((uint16_t)v >> 4);  /* 反转索引修复HMI镜像 */
+                /* Catmull-Rom三次插值: 比线性插值更平滑, 改善高频折线感 */
+                float v = catmull_rom(filtered_buf, ADC2_BUF_SIZE, (float)trig_pos + i * step);
+                wave_data[PAGE2_PTS-1-i] = wave_scale((uint16_t)v, adc2_avg, adc2_max - adc2_min);  /* 反转索引修复HMI镜像 */
               }
             }
             else
             {
               /* 频率无效时降级: 直接降采样 */
               for (uint16_t i = 0; i < PAGE2_PTS; i++)
-                curve_data[PAGE2_PTS-1-i] = filtered_buf[i * 8] >> 4;
+                wave_data[PAGE2_PTS-1-i] = wave_scale(filtered_buf[i * 8], adc2_avg, adc2_max - adc2_min);
             }
             HMI_tx_lock();
             HMI_curve_clear("s0.id", 0);
-            HMI_curve_addt("s0.id", 0, curve_data, PAGE2_PTS);
+            HMI_curve_addt("s0.id", 0, wave_data, PAGE2_PTS);
             HMI_tx_unlock();
             break;
           }
@@ -328,24 +362,25 @@ int main(void)
       }
     }
 
-    /* OLED显示: 软件Urms + Vpp + 基频 (ADC1已移除, L1右半暂留空待填补偿规律)
-       L1: S:xxxx         (软件Urms mV, 信号源端)
-       L2: P:xxxx         (Vpp mV, 已还原增益)
-       L3: f:xxxx K:xxxx  (基频kHz / bin索引)
-       L4: PGx RXxxx      (页面/RX计数)
+    /* OLED显示: 仅保留关键指标和系统状态
+       L1: S:xxxx mV  (软件Urms, 信号源端)
+       L2: P:xxxx mV  (Vpp, 已还原增益)
+       L3: f:xxxx kHz (基频频率)
+       L4: PGx RXxxx  (页面/RX计数)
     */
     uint16_t vpp_mv = (uint16_t)((float)(adc2_max - adc2_min) * 3300.0f / 4096.0f / FRONT_GAIN);
 
     OLED_ShowString(1,1,"S:");
     OLED_ShowNum(1,3,(uint16_t)urms_mv,4);
+    OLED_ShowString(1,8,"mV");
 
     OLED_ShowString(2,1,"P:");
     OLED_ShowNum(2,3,vpp_mv,4);
+    OLED_ShowString(2,8,"mV");
 
     OLED_ShowString(3,1,"f:");
     OLED_ShowNum(3,3,(uint16_t)(fft_freq_hz/1000.0f),4);
-    OLED_ShowString(3,8,"K:");
-    OLED_ShowNum(3,10,fft_k_peak,4);
+    OLED_ShowString(3,8,"kHz");
 
     OLED_ShowString(4,1,"PG");
     OLED_ShowNum(4,3,current_page,1);
