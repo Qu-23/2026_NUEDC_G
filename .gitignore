@@ -34,3 +34,6 @@ Desktop.ini
 
 # PDF (large binary)
 # *.pdf
+
+# Python scripts (临时辅助工具, 不纳入版本控制)
+*.py
